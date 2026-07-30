@@ -1,0 +1,171 @@
+{
+  "name": "sf-plugin-mcnext",
+  "description": "Salesforce CLI plugin to retrieve and deploy Marketing Cloud Next content that core sf commands cannot reach",
+  "version": "0.1.0",
+  "author": {
+    "name": "Joern Berkefeld",
+    "email": "joern.berkefeld@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoernBerkefeld/sf-plugin-mcnext.git"
+  },
+  "bugs": {
+    "url": "https://github.com/JoernBerkefeld/sf-plugin-mcnext/issues"
+  },
+  "homepage": "https://github.com/JoernBerkefeld/sf-plugin-mcnext#readme",
+  "dependencies": {
+    "@oclif/core": "^4",
+    "@salesforce/core": "^9",
+    "@salesforce/sf-plugins-core": "^12"
+  },
+  "devDependencies": {
+    "@oclif/plugin-command-snapshot": "^5.1.9",
+    "@salesforce/cli-plugins-testkit": "^5.3.10",
+    "@salesforce/dev-scripts": "^10",
+    "cross-env": "^10.1.0",
+    "eslint-plugin-sf-plugin": "^1.18.6",
+    "oclif": "^4.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "/lib",
+    "/messages",
+    "/oclif.manifest.json",
+    "/oclif.lock"
+  ],
+  "keywords": [
+    "salesforce",
+    "salesforcedx",
+    "sf",
+    "sf-plugin",
+    "sfdx-plugin",
+    "marketing-cloud",
+    "marketing-cloud-next",
+    "mcnext"
+  ],
+  "oclif": {
+    "commands": "./lib/commands",
+    "bin": "sf",
+    "topicSeparator": " ",
+    "devPlugins": [
+      "@oclif/plugin-help"
+    ],
+    "topics": {
+      "mcnext": {
+        "description": "Retrieve and deploy Marketing Cloud Next content and metadata."
+      },
+      "mcn": {
+        "description": "Short alias for the mcnext topic.",
+        "hidden": true
+      }
+    },
+    "flexibleTaxonomy": true
+  },
+  "scripts": {
+    "build": "wireit",
+    "clean": "sf-clean",
+    "clean-all": "sf-clean all",
+    "compile": "wireit",
+    "docs": "sf-docs",
+    "format": "wireit",
+    "lint": "wireit",
+    "lint:fix": "cross-env ESLINT_USE_FLAT_CONFIG=false eslint src test --fix",
+    "postpack": "sf-clean --ignore-signing-artifacts",
+    "prepack": "sf-prepack",
+    "prepare": "husky || true",
+    "test": "wireit",
+    "test:nuts": "nyc mocha \"**/*.nut.ts\" --slow 4500 --timeout 600000 --parallel",
+    "test:only": "wireit",
+    "version": "oclif readme"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "overrides": {
+    "brace-expansion": "^5.0.9",
+    "minimatch": "^10.0.3",
+    "serialize-javascript": "^7.0.5",
+    "uuid": "^11.1.1"
+  },
+  "wireit": {
+    "build": {
+      "dependencies": [
+        "compile",
+        "lint"
+      ]
+    },
+    "compile": {
+      "command": "tsc -p . --pretty --incremental",
+      "files": [
+        "src/**/*.ts",
+        "**/tsconfig.json",
+        "messages/**"
+      ],
+      "output": [
+        "lib/**",
+        "*.tsbuildinfo"
+      ],
+      "clean": "if-file-deleted"
+    },
+    "format": {
+      "command": "prettier --write \"+(src|test|schemas)/**/*.+(ts|js|json)|command-snapshot.json\"",
+      "files": [
+        "src/**/*.ts",
+        "test/**/*.ts",
+        "schemas/**/*.json",
+        "command-snapshot.json",
+        ".prettier*"
+      ],
+      "output": []
+    },
+    "lint": {
+      "command": "cross-env ESLINT_USE_FLAT_CONFIG=false eslint src test --color --cache --cache-location .eslintcache",
+      "files": [
+        "src/**/*.ts",
+        "test/**/*.ts",
+        "messages/**",
+        "**/.eslint*",
+        "**/tsconfig.json"
+      ],
+      "output": []
+    },
+    "test:compile": {
+      "command": "tsc -p \"./test\" --pretty",
+      "files": [
+        "test/**/*.ts",
+        "**/tsconfig.json"
+      ],
+      "output": []
+    },
+    "test": {
+      "dependencies": [
+        "test:compile",
+        "test:only",
+        "lint"
+      ]
+    },
+    "test:only": {
+      "command": "nyc mocha \"test/**/*.test.ts\"",
+      "env": {
+        "FORCE_COLOR": "2"
+      },
+      "files": [
+        "test/**/*.ts",
+        "src/**/*.ts",
+        "**/tsconfig.json",
+        ".mocha*",
+        "!*.nut.ts",
+        ".nycrc"
+      ],
+      "output": []
+    }
+  },
+  "exports": "./lib/index.js",
+  "type": "module"
+}

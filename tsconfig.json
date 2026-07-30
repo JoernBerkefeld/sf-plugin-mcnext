@@ -1,0 +1,11 @@
+{
+  "extends": "@salesforce/dev-config/tsconfig-strict-esm",
+  "compilerOptions": {
+    "outDir": "lib",
+    "rootDir": "src",
+    // @salesforce/core 9.0.0 ships a .d.ts referencing pino's TransportSingleOptions,
+    // which pino 9.14 removed. Our own sources remain fully type-checked.
+    "skipLibCheck": true
+  },
+  "include": ["./src/**/*.ts"]
+}

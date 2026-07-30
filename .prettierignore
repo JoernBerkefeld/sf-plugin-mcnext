@@ -1,0 +1,8 @@
+node_modules
+lib
+dist
+out
+coverage
+package-lock.json
+oclif.manifest.json
+oclif.lock

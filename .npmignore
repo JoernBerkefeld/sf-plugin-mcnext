@@ -1,0 +1,10 @@
+node_modules
+test
+coverage
+.github
+_refs
+*.test.ts
+*.nut.ts
+tsconfig*.json
+*.tsbuildinfo
+.eslintcache
