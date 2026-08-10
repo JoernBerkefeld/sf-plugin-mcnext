@@ -1,4 +1,10 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
+echo "[PRE-COMMIT] Checking package-lock.json is registry-only..."
+node scripts/check-lockfile-registry-only.mjs || {
+  echo "[PRE-COMMIT] package-lock.json has link:/file:/workspace: or local resolved paths. Run 'npm install --no-workspaces' to regenerate. See release-tracking.mdc."
+  exit 1
+}
+
 yarn lint && yarn pretty-quick --staged
