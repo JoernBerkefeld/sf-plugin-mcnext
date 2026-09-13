@@ -8,7 +8,7 @@ CMS integration is deferred until `sf-plugin-cms` publishes an approved public s
 
 ### Prerequisites
 
-- Node.js `20.0.0` or later, as required by this package. Verify it with `node --version`.
+- Node.js `22.19.0` or later, as required by this package. Verify it with `node --version`.
 - Salesforce CLI. Install or update the base CLI with npm, then verify it:
 
   ```bash
@@ -33,7 +33,7 @@ sf plugins
 Use this only when developing or testing a local checkout instead of the published npm package:
 
 ```bash
-npm install --no-workspaces
+npm install
 npm run compile
 sf plugins link .
 sf plugins

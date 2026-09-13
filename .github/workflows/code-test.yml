@@ -12,7 +12,7 @@ jobs:
         strategy:
             fail-fast: false
             matrix:
-                node: ['20.19', 22, 24]
+                node: ['22.19.0', 24]
         name: lint & test w/ node v${{ matrix.node }}
         steps:
             - uses: actions/checkout@v6
