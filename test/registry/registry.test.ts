@@ -22,7 +22,7 @@ describe('type registry', () => {
     expect(getType('identityResolution')?.state).to.equal('implemented');
     expect(getType('identityResolution')?.operations).to.deep.equal(['list', 'retrieve', 'export']);
     expect(getType('identityResolution')?.limitation).to.contain('Configuration only');
-    expect(getType('cmsContent')).to.include({ provider: 'cms-v2', state: 'deferred' });
+    expect(getType('cmsContent')).to.include({ provider: 'cms-service', state: 'deferred' });
     expect(getTypes({ state: 'implemented' }).map((type) => type.name)).to.deep.equal([
       'marketSegmentMember',
       'identityResolution',

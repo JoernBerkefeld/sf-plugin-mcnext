@@ -2,7 +2,7 @@
 
 Salesforce CLI plugin for working with Marketing Cloud Next data and configuration. The plugin can support read/write workflows overall: it implements MCN-specific capabilities where needed and points to or delegates to the core `sf` CLI when Salesforce CLI already owns retrieval, deployment, or data operations.
 
-CMS integration is deferred until `sf-plugin-cms` publishes a compatible command contract.
+CMS integration is deferred until `sf-plugin-cms` publishes an approved public service contract.
 
 ## v1 installation and getting started
 
@@ -76,7 +76,7 @@ The `mcn` topic is a hidden short alias for `mcnext`. This guide uses the full `
 
 **Common flags:**
 
-- `--provider <mcnext|core-sf|cms-v2>` filters by owner.
+- `--provider <mcnext|core-sf|cms-service|external/manual|secondary-data>` filters by owner.
 - `--state <implemented|delegated|conditional|deferred>` filters by support state.
 
 ```bash
@@ -189,7 +189,19 @@ sf mcnext identity-resolution export --target-org my-mcnext-org --ruleset-id 1ir
 
 **Important notes:** This is a configuration export, including available filters, match rules, reconciliation rules, statuses, counts, and referenced DMO names. It does not migrate unified profiles or export their computed rows.
 
-Future v2 and v3 releases should extend this same command guide with their commands and with any additional migration, CMS, product, authorization, and permission prerequisites.
+### `sf mcnext migration plan`
+
+**Purpose:** Write a deterministic, read-only source-to-target assessment containing the first v2 ownership/transport/support-state inventory and prerequisite preflight.
+
+**Required flags:** `--source-org`, `--target-org` / `-o`, and `--output-file`. Optional `--cms-evidence-file` accepts only an array of minimal opaque deferred nodes with `owner`, `status`, `sourceReference`, and `blockedOperation`.
+
+```bash
+sf mcnext migration plan --source-org source-mcn --target-org target-mcn --output-file migration-plan.json
+```
+
+**Expected output/file:** A stable JSON plan with source/target org IDs, v67 availability and distinct-org checks, actionable manual prerequisites, the full first-increment inventory, and no executable target payloads. Maximum-version discovery is diagnostic only; each org's authenticated v67 request independently determines its pass or blocked status. Coverage is expressed as separate declarative rows whenever ownership, transport, selection, prerequisites, dependencies, evidence, or status differs—for example MarketSegment object/field configuration versus records, clickjack trusted domains for external-form framing, managed packages, required target components, unresolved Prospect identity, layouts versus Lightning pages, and Data 360 definitions versus secondary rows.
+
+**Important notes:** Inventory completeness does not imply automation completeness. Rows honestly remain `conditional`, `manual prerequisite`, `unsupported`, or `deferred` until representative transport and source-to-target evidence exists. This command never deploys or mutates data. It does not import CMS code, inspect CMS payloads, create mappings, rewrite references, infer CMS lifecycle or ordering, or place a CMS source reference in a target payload. Blocked preflight checks produce an incomplete plan instead of an execution attempt.
 
 ## Capability ownership
 
@@ -205,7 +217,8 @@ Flows, flow definitions, flow tests, managed content types, content type bundles
 ## v1 scope and limitations
 
 - Direct Marketing Cloud Next API commands are pinned to API version `67.0`. Other versions are rejected because the retained endpoints were verified only against v67.
-- Generic CMS content, variants, media, workspaces, and publication are excluded. CMS integration is deferred until `sf-plugin-cms` publishes a compatible command contract.
+- Generic CMS content, variants, media, workspaces, publication, identities, mappings, lifecycle, and reference rewriting are excluded. CMS integration is deferred until `sf-plugin-cms` publishes an approved public service contract.
+- `sf mcnext migration plan` is assessment-only and writes no executable target payloads.
 - `ListEmail` is excluded from v1. Read evidence exists, but portable dependency resolution and safe deployment have not been proven.
 - Identity-resolution support is configuration-only. It does not migrate or export unified-profile rows.
 - Segment member export is read-only. Member IDs are opaque SSOT membership values and are not asserted to be Salesforce CRM record IDs.

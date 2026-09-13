@@ -35,10 +35,10 @@ export const MCN_TYPES: McnType[] = [
   {
     name: 'cmsContent',
     description: 'Generic CMS workspaces, content, variants, media, and publication',
-    provider: 'cms-v2',
+    provider: 'cms-service',
     state: 'deferred',
     operations: [],
-    limitation: 'Owned by sf-plugin-cms and intentionally excluded from MCN v1.',
+    limitation: 'Opaque deferred dependency until sf-plugin-cms publishes an approved public service contract.',
   },
   {
     name: 'flow',

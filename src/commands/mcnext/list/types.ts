@@ -25,7 +25,7 @@ export default class ListTypes extends SfCommand<ListTypesResult> {
   public static readonly flags = {
     provider: Flags.option({
       summary: messages.getMessage('flags.provider.summary'),
-      options: ['mcnext', 'core-sf', 'cms-v2'] as const,
+      options: ['mcnext', 'core-sf', 'cms-service', 'external/manual', 'secondary-data'] as const,
     })(),
     state: Flags.option({
       summary: messages.getMessage('flags.state.summary'),

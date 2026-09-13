@@ -1,7 +1,7 @@
 import { McnClient } from '../client/mcnClient.js';
 
 /** The component responsible for an operation. */
-export type Provider = 'mcnext' | 'core-sf' | 'cms-v2';
+export type Provider = 'mcnext' | 'core-sf' | 'cms-service' | 'external/manual' | 'secondary-data';
 
 /** Current implementation status of a registered type. */
 export type SupportState = 'implemented' | 'delegated' | 'conditional' | 'deferred';

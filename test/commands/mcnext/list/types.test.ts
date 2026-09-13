@@ -35,8 +35,8 @@ describe('mcnext list types', () => {
     expect(result.every((row) => row.delegatedTo === '')).to.equal(true);
   });
 
-  it('shows CMS lifecycle as deferred to v2', async () => {
-    const result = await ListTypes.run(['--provider', 'cms-v2']);
+  it('shows CMS lifecycle as deferred to the future public service', async () => {
+    const result = await ListTypes.run(['--provider', 'cms-service']);
     expect(result.map((row) => row.name)).to.deep.equal(['cmsContent']);
     expect(result[0]?.state).to.equal('deferred');
     expect(result[0]?.operations).to.deep.equal([]);

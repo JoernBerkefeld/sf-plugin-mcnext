@@ -1,6 +1,6 @@
 {
   "name": "sf-plugin-mcnext",
-  "description": "Salesforce CLI plugin for read-only Marketing Cloud Next exports, configuration, and core delegation",
+  "description": "Salesforce CLI plugin for Marketing Cloud Next read/write workflows and core CLI delegation",
   "version": "0.1.0",
   "author": {
     "name": "Joern Berkefeld",
