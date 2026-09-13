@@ -1,23 +1,31 @@
 # summary
 
-List the Marketing Cloud Next types this plugin knows about.
+List Marketing Cloud Next capability ownership and support state.
 
 # description
 
-Prints every registered type along with its coverage: whether this plugin implements it directly because core Salesforce CLI commands cannot reach it, or whether it is delegated to a core command such as "sf project retrieve start" or "sf data export bulk".
+Prints every registered capability with its owner, current support state, available operations, core Salesforce CLI delegation when applicable, and any evidence limitation.
 
-Use this to understand what "sf mcnext retrieve --gap-only" covers versus what "--all" adds.
+A registry entry is not automatically supported. `conditional` and `deferred` capabilities are shown so users can see the v1 boundary without the plugin claiming they are implemented.
 
 # examples
 
-- List every known type:
+- List every known capability:
 
   <%= config.bin %> <%= command.id %>
 
-- List only the types this plugin implements itself:
+- List only core Salesforce CLI delegations:
 
-  <%= config.bin %> <%= command.id %> --coverage gap
+  <%= config.bin %> <%= command.id %> --provider core-sf
 
-# flags.coverage.summary
+- List capabilities still blocked by evidence:
 
-Restrict the output to one coverage bucket.
+  <%= config.bin %> <%= command.id %> --state conditional
+
+# flags.provider.summary
+
+Restrict output to one owning provider.
+
+# flags.state.summary
+
+Restrict output to one current support state.

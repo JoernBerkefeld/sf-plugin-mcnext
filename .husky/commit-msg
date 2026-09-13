@@ -1,4 +1,8 @@
 #!/bin/sh
+# disable ANSI color codes in hook output (readable in Fork's plain-text log viewer)
+unset FORCE_COLOR
+export NO_COLOR=1
+
 . "$(dirname "$0")/_/husky.sh"
 
 yarn commitlint --edit

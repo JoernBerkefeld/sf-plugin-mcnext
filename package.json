@@ -1,6 +1,6 @@
 {
   "name": "sf-plugin-mcnext",
-  "description": "Salesforce CLI plugin to retrieve and deploy Marketing Cloud Next content that core sf commands cannot reach",
+  "description": "Salesforce CLI plugin for read-only Marketing Cloud Next exports, configuration, and core delegation",
   "version": "0.1.0",
   "author": {
     "name": "Joern Berkefeld",
@@ -58,7 +58,7 @@
     ],
     "topics": {
       "mcnext": {
-        "description": "Retrieve and deploy Marketing Cloud Next content and metadata."
+        "description": "Export and inspect Marketing Cloud Next data and configuration, with core CLI delegation."
       },
       "mcn": {
         "description": "Short alias for the mcnext topic.",
@@ -77,7 +77,7 @@
     "lint": "wireit",
     "lint:fix": "cross-env ESLINT_USE_FLAT_CONFIG=false eslint src test --fix",
     "postpack": "sf-clean --ignore-signing-artifacts",
-    "prepack": "sf-prepack",
+    "prepack": "npm run build && oclif manifest",
     "prepare": "husky || true",
     "test": "wireit",
     "test:nuts": "nyc mocha \"**/*.nut.ts\" --slow 4500 --timeout 600000 --parallel",

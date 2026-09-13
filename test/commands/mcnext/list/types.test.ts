@@ -1,6 +1,6 @@
 import { TestContext } from '@salesforce/core/testSetup';
-import { expect } from 'chai';
 import { stubSfCommandUx } from '@salesforce/sf-plugins-core';
+import { expect } from 'chai';
 import ListTypes from '../../../../src/commands/mcnext/list/types.js';
 
 describe('mcnext list types', () => {
@@ -14,21 +14,36 @@ describe('mcnext list types', () => {
     $$.restore();
   });
 
-  it('lists every type by default', async () => {
+  it('lists ownership, state, and operations for every capability', async () => {
     const result = await ListTypes.run([]);
     expect(result.length).to.be.greaterThan(0);
-    expect(result.some((row) => row.coverage === 'gap')).to.equal(true);
-    expect(result.some((row) => row.coverage === 'core-sf')).to.equal(true);
+    expect(result.some((row) => row.state === 'delegated')).to.equal(true);
+    expect(result.some((row) => row.state === 'conditional')).to.equal(true);
+    expect(result.every((row) => Array.isArray(row.operations))).to.equal(true);
   });
 
-  it('restricts output with --coverage gap', async () => {
-    const result = await ListTypes.run(['--coverage', 'gap']);
-    expect(result.every((row) => row.coverage === 'gap')).to.equal(true);
-    expect(result.every((row) => row.delegatedTo === '- (this plugin)')).to.equal(true);
+  it('filters MCN-owned capabilities with explicit support boundaries', async () => {
+    const result = await ListTypes.run(['--provider', 'mcnext']);
+    expect(result.length).to.equal(3);
+    expect(result.filter((row) => row.state === 'implemented').length).to.equal(2);
+    expect(result.find((row) => row.name === 'identityResolution')?.operations).to.deep.equal([
+      'list',
+      'retrieve',
+      'export',
+    ]);
+    expect(result.find((row) => row.name === 'identityResolution')?.limitation).to.contain('Configuration only');
+    expect(result.every((row) => row.delegatedTo === '')).to.equal(true);
   });
 
-  it('names the exact core command for delegated types', async () => {
-    const result = await ListTypes.run(['--coverage', 'core-sf']);
+  it('shows CMS lifecycle as deferred to v2', async () => {
+    const result = await ListTypes.run(['--provider', 'cms-v2']);
+    expect(result.map((row) => row.name)).to.deep.equal(['cmsContent']);
+    expect(result[0]?.state).to.equal('deferred');
+    expect(result[0]?.operations).to.deep.equal([]);
+  });
+
+  it('names the exact core command for delegated metadata', async () => {
+    const result = await ListTypes.run(['--provider', 'core-sf']);
     const flow = result.find((row) => row.name === 'flow');
     expect(flow?.delegatedTo).to.equal('sf project retrieve start -m Flow');
   });

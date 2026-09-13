@@ -2,8 +2,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { McnArtifact, McnType } from '../registry/types.js';
 
-/** On-disk layout. */
-export type FormatName = 'mcdev' | 'sfdx';
+/** On-disk layout for MCN-owned non-Metadata-API artifacts. */
+export type FormatName = 'mcdev' | 'project';
 
 /**
  * Resolves on-disk paths for retrieved artifacts.
@@ -34,9 +34,13 @@ export class FormatWriter {
    * @returns the absolute-or-relative directory path
    */
   public directoryFor(type: McnType): string {
+    if (!type.directory) {
+      throw new Error(`${type.name} has no MCN-owned artifact directory`);
+    }
+
     return this.format === 'mcdev'
       ? join(this.root, 'retrieve', this.orgAlias, type.directory)
-      : join(this.root, 'force-app', 'main', 'default', type.directory);
+      : join(this.root, '.sf', 'mcnext', type.directory);
   }
 
   /**

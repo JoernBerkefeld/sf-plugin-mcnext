@@ -1,18 +1,19 @@
 import { McnClient } from '../client/mcnClient.js';
 
-/**
- * Whether a type needs this plugin at all.
- *
- * - `gap`     - unreachable via core `sf` commands; this plugin implements it.
- * - `core-sf` - already covered by a core command; this plugin only delegates.
- */
-export type Coverage = 'gap' | 'core-sf';
+/** The component responsible for an operation. */
+export type Provider = 'mcnext' | 'core-sf' | 'cms-v2';
 
-/** How a `core-sf` type is retrieved and deployed by the orchestrator. */
+/** Current implementation status of a registered type. */
+export type SupportState = 'implemented' | 'delegated' | 'conditional' | 'deferred';
+
+/** Operations a type can expose through this plugin or a delegated provider. */
+export type McnOperation = 'list' | 'retrieve' | 'deploy' | 'export';
+
+/** How a core-sf type is retrieved or deployed by the orchestrator. */
 export type Delegation = {
-  /** Metadata API type name, when delegated to `sf project retrieve|deploy start`. */
+  /** Metadata API type name, when delegated to sf project commands. */
   metadataType?: string;
-  /** sObject name, when delegated to the `sf data` commands. */
+  /** sObject name, when delegated to sf data commands. */
   sObject?: string;
   /** Fields to select for record exports. */
   fields?: string[];
@@ -20,55 +21,44 @@ export type Delegation = {
 
 /** A single retrievable/deployable artifact within an org. */
 export type McnArtifact = {
-  /** Stable, portable identity used as the on-disk file name. */
+  /** Stable identity used by the owning MCN workflow. */
   key: string;
   /** Human-readable label for logs and tables. */
   name: string;
   /** The serialized payload written to disk. */
   content: Record<string, unknown>;
-  /** Optional body written to a sidecar file, e.g. email HTML. */
+  /** Optional body written to a sidecar file. */
   sidecar?: { extension: string; body: string };
 };
 
-/** Implementation for one `gap` type. */
+/** Implementation for one MCN-owned artifact type. */
 export type TypeHandler = {
-  /**
-   * List every artifact of this type in the org, without hydrating bodies.
-   *
-   * @param client - the API client
-   * @returns lightweight descriptors
-   */
+  /** List lightweight artifact descriptors. */
   list(client: McnClient): Promise<Array<{ key: string; name: string }>>;
-
-  /**
-   * Fetch one artifact in full.
-   *
-   * @param client - the API client
-   * @param key - the artifact key from `list`
-   * @returns the hydrated artifact
-   */
+  /** Fetch one artifact in full. */
   retrieve(client: McnClient, key: string): Promise<McnArtifact>;
-
-  /**
-   * Write one artifact back to the org.
-   *
-   * @param client - the API client
-   * @param artifact - the artifact read from disk
-   */
+  /** Write one artifact back to the org. */
   deploy(client: McnClient, artifact: McnArtifact): Promise<void>;
 };
 
-/** A registered Marketing Cloud Next type. */
+/** A registered Marketing Cloud Next capability. */
 export type McnType = {
-  /** CLI-facing name, e.g. `emailContent`. */
+  /** CLI-facing name, for example marketSegmentMember. */
   name: string;
-  /** One-line description used in `sf mcnext list types` and the generated README table. */
+  /** One-line description used in list output and documentation. */
   description: string;
-  coverage: Coverage;
-  /** Directory name under the retrieve root. */
-  directory: string;
-  /** Present when `coverage` is `core-sf`. */
+  /** Component that owns the implementation or future implementation. */
+  provider: Provider;
+  /** Truthful current status; conditional and deferred entries are not supported. */
+  state: SupportState;
+  /** Operations available or planned under the declared state. */
+  operations: McnOperation[];
+  /** Directory name for MCN-owned artifacts when applicable. */
+  directory?: string;
+  /** Present when provider is core-sf. */
   delegation?: Delegation;
-  /** Present when `coverage` is `gap`. */
+  /** Present only when an MCN-owned artifact workflow is implemented. */
   handler?: TypeHandler;
+  /** Short reason for a conditional or deferred state. */
+  limitation?: string;
 };
