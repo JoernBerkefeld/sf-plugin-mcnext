@@ -35,11 +35,16 @@ describe('mcnext list types', () => {
     expect(result.every((row) => row.delegatedTo === '')).to.equal(true);
   });
 
-  it('shows CMS lifecycle as deferred to the future public service', async () => {
+  it('shows provider-owned CMS export evidence as planning-only and conditional', async () => {
     const result = await ListTypes.run(['--provider', 'cms-service']);
     expect(result.map((row) => row.name)).to.deep.equal(['cmsContent']);
-    expect(result[0]?.state).to.equal('deferred');
-    expect(result[0]?.operations).to.deep.equal([]);
+    expect(result[0]).to.include({ provider: 'cms-service', state: 'conditional', delegatedTo: '' });
+    expect(result[0]?.operations).to.deep.equal(['export']);
+    expect(result[0]?.limitation).to.contain('sf mcnext migration plan --cms-plan');
+    expect(result[0]?.limitation).to.contain('separately installed sf-plugin-cms >=0.3.1 versioned CLI contract');
+    expect(result[0]?.limitation).to.contain(
+      'MCN owns no CMS content retrieval, import, deployment, payload rewriting, or execution'
+    );
   });
 
   it('names the exact core command for delegated metadata', async () => {

@@ -2,7 +2,7 @@
 
 Salesforce CLI plugin for working with Marketing Cloud Next data and configuration. The plugin can support read/write workflows overall: it implements MCN-specific capabilities where needed and points to or delegates to the core `sf` CLI when Salesforce CLI already owns retrieval, deployment, or data operations.
 
-CMS integration is deferred until `sf-plugin-cms` publishes an approved public service contract.
+CMS-aware migration planning is available through a separately installed, compatible `sf-plugin-cms`. The MCN plugin does not bundle, auto-install, upgrade, downgrade, or repair the CMS provider.
 
 ## v1 installation and getting started
 
@@ -27,6 +27,18 @@ The v1 commands documented below export or inspect data and configuration. The c
 sf plugins install sf-plugin-mcnext
 sf plugins
 ```
+
+The CMS provider is optional for CMS-independent commands. Install it separately only when you intend to use `sf mcnext migration plan --cms-plan`:
+
+```bash
+sf plugins install sf-plugin-cms@0.3.1
+sf plugins inspect sf-plugin-cms --json
+sf cms info --contract-version 1 --json
+```
+
+CMS planning requires `sf-plugin-cms` version `0.3.1` or later, but version alone is not sufficient. The provider must be discoverable by the same `sf` executable and advertise compatible command-result and package-manifest contracts, capability `workspace.export.external-reference-correlation`, and correlation contract `sf-cms-external-reference-correlations@1`. A newer provider is accepted only when those retained contracts and semantics remain compatible.
+
+If the provider is missing, too old, newer but incompatible, unavailable, malformed, or missing required provenance/correlation evidence, CMS-dependent planning fails closed. CMS-independent commands and a migration plan without `--cms-plan` remain available.
 
 ### Local-development alternative
 
@@ -225,17 +237,115 @@ sf mcnext identity-resolution export --target-org my-mcnext-org --ruleset-id 1ir
 
 ### `sf mcnext migration plan`
 
-**Purpose:** Write a deterministic, read-only source-to-target assessment containing the first v2 ownership/transport/support-state inventory and prerequisite preflight.
+**Purpose:** Write a deterministic source-to-target assessment. The command performs bounded prerequisite checks and can optionally add CMS contract, package, correlation, and workspace-route evidence. It is always planning-only.
 
-**Required flags:** `--source-org`, `--target-org` / `-o`, and `--output-file`. Optional `--cms-evidence-file` accepts only an array of minimal opaque deferred nodes with `owner`, `status`, `sourceReference`, and `blockedOperation`.
+**Typical use:** Compare source and target prerequisites, retain a stable capability inventory, or assess CMS workspace evidence and explicit source-to-target routes before deciding what can be migrated manually or by another tool.
+
+**Key inputs:**
+
+- `--source-org <alias-or-username>`: source org used for read-only assessment and CMS export.
+- `--target-org <alias-or-username>` / `-o`: target org used for read-only prerequisite checks.
+- `--output-file <path>`: destination for the deterministic JSON plan.
+- `--cms-plan`: enables CMS provider discovery and one read-only aggregate export of Marketing workspaces.
+- `--cms-workspace-map <path>`: required with `--cms-plan`; supplies explicit source-workspace-ID to target-workspace-ID routes.
+- `--cms-export-dir <path>`: required with `--cms-plan`; must identify a new, unused run-owned location for exported packages and retained evidence.
+- `--cms-evidence-file <path>`: optional separately supplied opaque evidence; it does not invoke CMS or make a plan executable.
+
+The three CMS planning flags are a unit: both companion flags are required when `--cms-plan` is present, and neither companion flag is accepted without it. The workspace-map file has exactly this shape:
+
+```json
+{
+  "version": 1,
+  "workspaces": {
+    "0Zu000000000001AAA": "0Zu000000000101AAA",
+    "0Zu000000000002AAA": "0Zu000000000102AAA"
+  }
+}
+```
+
+Keys are exact canonical source workspace IDs and values are explicit target workspace IDs. Workspace names are never routing keys. The parser rejects duplicate JSON keys, duplicate target routes, empty or whitespace-altered IDs, unsupported versions, unexpected fields, empty maps, and oversized input. The plan retains the map's exact-byte SHA-256 and byte length as provenance. A missing route blocks only the affected CMS workspace.
+
+Create a CMS-independent assessment:
 
 ```bash
 sf mcnext migration plan --source-org source-mcn --target-org target-mcn --output-file migration-plan.json
 ```
 
-**Expected output/file:** A stable JSON plan with source/target org IDs, v67 availability and distinct-org checks, actionable manual prerequisites, the full first-increment inventory, and no executable target payloads. Maximum-version discovery is diagnostic only; each org's authenticated v67 request independently determines its pass or blocked status. Coverage is expressed as separate declarative rows whenever ownership, transport, selection, prerequisites, dependencies, evidence, or status differs—for example MarketSegment object/field configuration versus records, clickjack trusted domains for external-form framing, managed packages, required target components, unresolved Prospect identity, layouts versus Lightning pages, and Data 360 definitions versus secondary rows.
+Add CMS planning evidence:
 
-**Important notes:** Inventory completeness does not imply automation completeness. Rows honestly remain `conditional`, `manual prerequisite`, `unsupported`, or `deferred` until representative transport and source-to-target evidence exists. This command never deploys or mutates data. It does not import CMS code, inspect CMS payloads, create mappings, rewrite references, infer CMS lifecycle or ordering, or place a CMS source reference in a target payload. Blocked preflight checks produce an incomplete plan instead of an execution attempt.
+```bash
+sf mcnext migration plan --source-org source-mcn --target-org target-mcn --output-file migration-plan.json --cms-plan --cms-workspace-map cms-workspaces.json --cms-export-dir .mcnext-runs/cms-export
+```
+
+Supply opaque evidence without invoking CMS:
+
+```bash
+sf mcnext migration plan --source-org source-mcn --target-org target-mcn --output-file migration-plan.json --cms-evidence-file cms-evidence.json
+```
+
+**Output and artifacts:** The command prints a `Migration prerequisite preflight` table and writes the JSON plan. Without CMS planning, a representative `--json` result is:
+
+```json
+{
+  "outputFile": "migration-plan.json",
+  "sourceOrgId": "0ZZ000000000001AAA",
+  "targetOrgId": "0ZZ000000000002AAA",
+  "preflightPassed": true,
+  "inventoryItems": 66,
+  "deferredCmsDependencies": 0,
+  "readOnly": true
+}
+```
+
+When CMS planning is requested, the result adds a bounded summary of the CMS branch:
+
+```json
+{
+  "outputFile": "migration-plan.json",
+  "sourceOrgId": "0ZZ000000000001AAA",
+  "targetOrgId": "0ZZ000000000002AAA",
+  "preflightPassed": true,
+  "inventoryItems": 66,
+  "deferredCmsDependencies": 0,
+  "cmsPlanning": { "state": "ownership-uncertain", "experimental": true, "readyRoutes": 0, "blockedRoutes": 1 },
+  "readOnly": true
+}
+```
+
+The plan file begins with stable top-level fields and contains detailed `preflight`, `inventory`, optional `cmsPlanning`, and deferred-evidence records:
+
+```json
+{
+  "schemaVersion": 1,
+  "mode": "read-only",
+  "testedApiVersion": "67.0",
+  "sourceOrgId": "0ZZ000000000001AAA",
+  "targetOrgId": "0ZZ000000000002AAA",
+  "executableTargetPayloads": []
+}
+```
+
+**CMS provider operations:** Planning invokes only these public CLI surfaces:
+
+```bash
+sf cms info --contract-version 1 --json
+sf cms export workspace --target-org <source-org> --all --workspace-type Marketing --output-dir <cms-export-dir> --contract-version 1 --json
+```
+
+The export runs once per planning request. MCN validates the provider identity and version, status/exit agreement, capability state, package manifest, exact-byte hashes, path confinement, source-org/workspace/package provenance, and `sf-cms-external-reference-correlations@1` evidence. Correlation uses exact opaque source-value equality only. MCN does not inspect item bodies to derive identity, normalize or hash source references, fuzzy-match names or IDs, synthesize mappings, discover CMS dependencies, choose import order, or perform CMS-internal rewriting. CMS remains the owner of identity, dependency closure, canonical `referenceId` values, package schemas, source-to-target CMS mappings, import ordering, and internal rewrites.
+
+**Planning states:**
+
+- `ready-for-execution`: not produced because the command has no independently evidenced MCN dependency source.
+- `partial`: usable evidence exists, but one or more CMS-dependent branches are blocked or failed.
+- `blocked`: compatibility, capability, route, integrity, provenance, or correlation evidence prevents execution readiness.
+- `failed`: CMS discovery or export failed.
+- `ownership-uncertain`: exact ownership or field semantics are not evidenced.
+- `experimental`: a visible qualifier on otherwise ready or partial evidence, not a primary state and not a waiver for validation.
+
+Capabilities advertised as `implemented` or `experimental` can contribute planning evidence when every required check passes. Experimental qualification is visible in human output, command results, and plan records. Human output also summarizes CMS state and route counts separately from prerequisite preflight, with guidance when CMS planning is not ready. Correlations are retained as planning evidence, but there is no independently evidenced workspace/owner/field-bound MCN dependency source, so successful package and route evidence remains `ownership-uncertain` and produces no ready dependent edge. `--cms-evidence-file` input cannot fill that gap. Missing or unknown capability states, `unavailable` capabilities, malformed envelopes, incompatible contracts, partial package evidence, unresolved provider diagnostics, package/provenance failures, and zero, duplicate, or conflicting exact correlations block the dependent branch.
+
+**Important limitations:** The command may read org prerequisites, discover the CMS provider, run read-only aggregate export, read public package evidence, and write local plan/evidence files. It never runs CMS import, passes `--apply`, deploys, writes or deletes target records, rewrites references, creates executable target payloads, performs cleanup or rollback, or mutates either org. Without `--cms-plan`, no CMS command runs, and CMS provider failures do not affect CMS-independent paths.
 
 ## Capability ownership
 
@@ -251,7 +361,7 @@ Flows, flow definitions, flow tests, managed content types, content type bundles
 ## v1 scope and limitations
 
 - Direct Marketing Cloud Next API commands are pinned to API version `67.0`. Other versions are rejected because the retained endpoints were verified only against v67.
-- Generic CMS content, variants, media, workspaces, publication, identities, mappings, lifecycle, and reference rewriting are excluded. CMS integration is deferred until `sf-plugin-cms` publishes an approved public service contract.
+- CMS-aware migration planning requires the separately installed provider and consumes only its public CLI JSON contract. There is no direct CMS JavaScript API dependency.
 - `sf mcnext migration plan` is assessment-only and writes no executable target payloads.
 - `ListEmail` is excluded from v1. Read evidence exists, but portable dependency resolution and safe deployment have not been proven.
 - Identity-resolution support is configuration-only. It does not migrate or export unified-profile rows.

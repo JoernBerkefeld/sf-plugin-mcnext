@@ -295,10 +295,13 @@ function cliError(message: string, error: unknown, diagnostics = ''): CmsCliErro
   return new CmsCliError(`CMS CLI ${message}: ${redact(`${detail} ${diagnostics}`)}`);
 }
 
-function redact(value: string): string {
+/** Bound provider text before displaying or persisting diagnostic evidence. */
+export function redact(value: string): string {
   return value
+    .replace(/\bBearer\s+[^\s,;"']+/gi, 'Bearer [REDACTED]')
     .replace(/(authorization|token|secret|password|cookie)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
-    .replace(/[A-Za-z]:\\[^\r\n"']+/g, '[REDACTED_PATH]')
-    .replace(/\/(?:Users|home|tmp)\/[^\r\n"']+/g, '[REDACTED_PATH]')
+    .replace(/[A-Za-z]:[\\/][^\r\n"']+/g, '[REDACTED_PATH]')
+    .replace(/\\\\[^\r\n"']+/g, '[REDACTED_PATH]')
+    .replace(/(^|[\s("'=])\/[^\s"']+/g, '$1[REDACTED_PATH]')
     .slice(0, 2048);
 }

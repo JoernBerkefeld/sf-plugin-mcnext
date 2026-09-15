@@ -22,7 +22,15 @@ describe('type registry', () => {
     expect(getType('identityResolution')?.state).to.equal('implemented');
     expect(getType('identityResolution')?.operations).to.deep.equal(['list', 'retrieve', 'export']);
     expect(getType('identityResolution')?.limitation).to.contain('Configuration only');
-    expect(getType('cmsContent')).to.include({ provider: 'cms-service', state: 'deferred' });
+    expect(getType('cmsContent')).to.include({ provider: 'cms-service', state: 'conditional' });
+    expect(getType('cmsContent')?.operations).to.deep.equal(['export']);
+    expect(getType('cmsContent')?.limitation).to.contain('sf mcnext migration plan --cms-plan');
+    expect(getType('cmsContent')?.limitation).to.contain(
+      'separately installed sf-plugin-cms >=0.3.1 versioned CLI contract'
+    );
+    expect(getType('cmsContent')?.limitation).to.contain(
+      'MCN owns no CMS content retrieval, import, deployment, payload rewriting, or execution'
+    );
     expect(getTypes({ state: 'implemented' }).map((type) => type.name)).to.deep.equal([
       'marketSegmentMember',
       'identityResolution',

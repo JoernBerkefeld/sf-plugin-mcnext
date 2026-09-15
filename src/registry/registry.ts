@@ -34,11 +34,12 @@ export const MCN_TYPES: McnType[] = [
   },
   {
     name: 'cmsContent',
-    description: 'Generic CMS workspaces, content, variants, media, and publication',
+    description: 'Provider-owned CMS workspaces and content evidence for migration planning',
     provider: 'cms-service',
-    state: 'deferred',
-    operations: [],
-    limitation: 'Opaque deferred dependency until sf-plugin-cms publishes an approved public service contract.',
+    state: 'conditional',
+    operations: ['export'],
+    limitation:
+      'Capability discovery and aggregate export evidence can be consumed by sf mcnext migration plan --cms-plan through the separately installed sf-plugin-cms >=0.3.1 versioned CLI contract; MCN owns no CMS content retrieval, import, deployment, payload rewriting, or execution.',
   },
   {
     name: 'flow',

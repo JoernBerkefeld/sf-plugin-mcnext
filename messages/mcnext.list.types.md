@@ -4,9 +4,9 @@ List Marketing Cloud Next capability ownership and support state.
 
 # description
 
-Prints every registered capability with its owner, current support state, available operations, core Salesforce CLI delegation when applicable, and any evidence limitation.
+Prints every registered capability with its owner, current support state, implemented, delegated, or conditionally evidenced operations, core Salesforce CLI delegation when applicable, and any evidence limitation.
 
-A registry entry is not automatically supported. `conditional` and `deferred` capabilities are shown so users can see the v1 boundary without the plugin claiming they are implemented.
+A registry entry is not automatically supported. `conditional` and `deferred` capabilities are shown so users can see the v1 boundary without the plugin claiming MCN owns or implements those operations.
 
 # examples
 
