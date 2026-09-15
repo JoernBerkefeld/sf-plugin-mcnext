@@ -189,6 +189,40 @@ sf mcnext identity-resolution export --target-org my-mcnext-org --ruleset-id 1ir
 
 **Important notes:** This is a configuration export, including available filters, match rules, reconciliation rules, statuses, counts, and referenced DMO names. It does not migrate unified profiles or export their computed rows.
 
+### `sf mcnext flow source`
+
+**Purpose:** Retrieve selected Flow source, validate it through Core check-only deployment, or explicitly create/update one inactive same-org draft. Core Salesforce CLI remains the metadata transport; this adapter adds bounded selection and identity checks.
+
+**Key inputs:**
+
+- Every operation requires `--operation <retrieve|validate|create|update>`, `--member <exact-Flow-API-name>`, `--target-org <alias-or-username>`, and `--project-dir <existing-DX-project>`. `--wait` accepts 1–30 minutes (default `10`). Use `--json` for structured results.
+- `retrieve` and `validate` accept repeated `--member` selections and use the project's configured package directories. Validation does not apply a deployment.
+- `create` and `update` require exactly one member plus `--source-file <Flow-XML-path>`, `--expected-org-id <18-character-destination-org-ID>`, `--source-org-id <18-character-source-org-ID>`, and `--reuse-same-org-references`. The source file must be inside a configured package directory. Source and destination org IDs must match: source provenance and reference reuse are explicit caller-verified declarations, not inferred mappings.
+- `update` additionally requires `--expected-definition-id <18-character-FlowDefinition-ID>` and `--expected-latest-version-id <18-character-latest-Flow-version-ID>` from a verified current target baseline. These flags are UPDATE-only.
+
+**Mutation contract:** CREATE requires a fresh valid API name and rejects an existing definition rather than overwriting it. UPDATE requires the existing inactive member, checks its identity, status and modification baseline before and after dry-run, and never falls back to CREATE. Supported source is inactive `Draft` or `InvalidDraft` `AutoLaunchedFlow` XML. Configuration is transported unchanged, including actions, inputs, tracking, wiring and `publishSegment`; it is not stripped into a simplified replacement or made runtime-ready.
+
+**Results and caller coordination:** Results identify the operation, state, Core job and retained member diagnostics. A pending result is not success (public command exit code `69`): inspect the Core job before retrying. Core provides neither atomic create-only deployment nor atomic update-only/compare-and-swap. Reserve the selected name or existing target against concurrent external writers for the entire operation; preflight and post-dry-run checks do not close the final check/apply race. No activation, execution, debugging, sending, publication operation, or Campaign-association rewrite is exposed.
+
+**Retained acceptance (2026-09-15):** A normally packed, freshly privately npm-installed candidate passed public oclif retrieve, real check-only validation, same-org draft CREATE, UPDATE and repeat UPDATE. Independent XML readbacks matched the intended documents; repeated CREATE rejected the existing name, and the original source remained unchanged. Follow-up reads confirmed inactive definitions and versions, no active/activation/scheduled-start values on the selected FlowRecords, and no Campaign association on the two new fixtures. Repetition proves semantic equality, not absence of platform timestamp changes or automation side effects. This is public installed-command evidence, not host `sf plugins install` registration, cross-org Flow portability, runtime readiness, or historical no-send proof.
+
+### `sf mcnext campaign config`
+
+**Purpose:** Export, create or update a bounded Campaign scalar configuration through Core Salesforce CLI. Supported fields are `Name`, `Type`, `Status`, `IsActive` and `Description`; this is not a Campaign dependency-tree migration.
+
+**Key inputs:**
+
+- Every operation requires `--operation <export|create|update>`, `--target-org <alias-or-username>`, `--expected-org-id <18-character-org-ID>`, `--api-version <version>`, and `--project-dir <existing-directory>`. Relative file paths resolve from that directory; `--json` returns the structured result.
+- `export`: exact `--record-id <18-character-Campaign-ID>` and `--output-file <new-artifact-path>`.
+- `create`: `--input-file <artifact-path>`, a distinct fresh `--target-name`, and `--journal-file <new-private-journal-path>`.
+- `update`: `--input-file <patch-path>`, exact `--record-id <18-character-target-Campaign-ID>`, and `--expected-name <current-target-name>`. UPDATE cannot rename or upsert.
+
+**Artifacts and safety:** Input artifacts contain `sourceId` and a nonempty `fields` object. Export omits null scalar values. CREATE explicitly records the source-to-target identity mapping in its journal, retaining target-local owner defaults. A private pending journal is written before mutation and the returned identity is saved before readback. Existing target names are rejected, but name absence checks are not atomic uniqueness guarantees. UPDATE verifies the exact ID/current name, checks submitted values by readback, and preserves the selected untouched fields and relationships. Source relationships are rejected on export; relationship inputs, custom fields, null clearing, empty strings and complex quoting are unsupported. Reconcile failed or ambiguous writes manually; never blindly retry. Repeated UPDATE can rerun automation even when scalar values are unchanged. No member migration, sending, schema deployment or automatic lifecycle operation is implemented.
+
+**Retained acceptance (2026-09-15):** An independently packed and privately npm-installed candidate passed public-command cross-org export, five-scalar CREATE, exact readback, Description UPDATE and repeat UPDATE, including preservation checks and an existing-name CREATE conflict. The source remained unchanged. Campaign-specific compiled implementation and messages, the Campaign manifest entry, and the shared Core execution function match the newer normally packed Flow candidate. The full shared Flow module and package metadata differ: this is matching component provenance, not a new Campaign roundtrip on that newer package or proof of an identical complete dependency tree. Scalar repeat equality does not prove side-effect idempotence or absence of indirect/background sends.
+
+**Combined evidence boundary:** These bounded Flow/Campaign checks do not establish host `sf` plugin registration, integration with the current CMS provider, cross-org Flow rewriting, Flow-to-Campaign association creation, or complete seven-family migration acceptance.
+
 ### `sf mcnext migration plan`
 
 **Purpose:** Write a deterministic, read-only source-to-target assessment containing the first v2 ownership/transport/support-state inventory and prerequisite preflight.

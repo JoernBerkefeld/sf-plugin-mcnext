@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+    <actionCalls>
+        <name>Send_Email_Message_Action</name>
+        <label>Example Email</label>
+        <locationX>0</locationX><locationY>0</locationY>
+        <actionName>sendEmailMessage</actionName><actionType>sendEmailMessage</actionType>
+        <flowTransactionModel>CurrentTransaction</flowTransactionModel>
+        <inputParameters><name>clickTracking</name><value><booleanValue>true</booleanValue></value></inputParameters>
+        <inputParameters><name>openTracking</name><value><booleanValue>true</booleanValue></value></inputParameters>
+        <inputParameters><name>contentId</name><value><stringValue>marketing--Example_Workspace.sfdc_cms__email--EXAMPLE_CONTENT_KEY</stringValue></value></inputParameters>
+        <nameSegment>sendEmailMessage</nameSegment>
+    </actionCalls>
+    <apiVersion>67.0</apiVersion>
+    <areMetricsLoggedToDataCloud>false</areMetricsLoggedToDataCloud>
+    <dataSpace>default</dataSpace><environments>Default</environments>
+    <interviewLabel>Example Flow {!$Flow.CurrentDateTime}</interviewLabel><label>Example Flow</label>
+    <processMetadataValues><name>BuilderType</name><value><stringValue>LightningFlowBuilder</stringValue></value></processMetadataValues>
+    <processMetadataValues><name>CanvasMode</name><value><stringValue>AUTO_LAYOUT_CANVAS</stringValue></value></processMetadataValues>
+    <processMetadataValues><name>OriginBuilderType</name><value><stringValue>LightningFlowBuilder</stringValue></value></processMetadataValues>
+    <processType>AutoLaunchedFlow</processType>
+    <start>
+        <locationX>0</locationX><locationY>0</locationY>
+        <connector><targetReference>Send_Email_Message_Action</targetReference></connector>
+        <object>UnifiedssotIndividualMkt__dlm</object><publishSegment>true</publishSegment>
+        <segment>1sg000000000001AAA</segment><triggerType>Segment</triggerType>
+    </start>
+    <status>InvalidDraft</status>
+</Flow>
