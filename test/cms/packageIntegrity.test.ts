@@ -235,6 +235,7 @@ describe('CMS package integrity evidence', () => {
     await rejects(setup, 'symlink or reparse entry');
 
     await rm(join(setup.artifact, 'linked.json'));
+    await rm(join(setup.artifact, 'nested', 'item.json'));
     const items = setup.manifest.items as Array<Record<string, unknown>>;
     items[0].path = 'nested';
     await rewriteManifest(setup);
