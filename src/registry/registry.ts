@@ -39,7 +39,7 @@ export const MCN_TYPES: McnType[] = [
     state: 'conditional',
     operations: ['export'],
     limitation:
-      'Capability discovery and aggregate export evidence can be consumed by sf mcnext migration plan --cms-plan through the separately installed sf-plugin-cms >=0.3.1 versioned CLI contract; MCN owns no CMS content retrieval, import, deployment, payload rewriting, or execution.',
+      'Capability discovery and aggregate export evidence can be consumed by sf mcnext migration plan --cms-plan through the separately installed sf-plugin-cms >=0.4.0 versioned CLI contract; MCN owns no CMS content retrieval, import, deployment, payload rewriting, or execution.',
   },
   {
     name: 'flow',

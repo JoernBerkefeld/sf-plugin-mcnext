@@ -6,7 +6,7 @@ Create a deterministic, read-only Marketing Cloud Next migration plan.
 
 Runs bounded source/target prerequisite checks and writes an ownership, transport, support-state, and dependency inventory as deterministic JSON.
 
-With `--cms-plan`, this command discovers a separately installed compatible `sf-plugin-cms`, performs one read-only aggregate Marketing workspace export, validates public contract, package integrity, provenance, exact correlation evidence, and explicit workspace routes, and records planning-only states. Install and verify the provider with `sf plugins install sf-plugin-cms@0.3.1`, `sf plugins inspect sf-plugin-cms --json`, and `sf cms info --contract-version 1 --json`. Version `0.3.1` is the minimum; retained contract compatibility is authoritative. Implemented and experimental capabilities can contribute visibly labeled planning evidence after all checks pass. This increment has no independently evidenced workspace/owner/field-bound MCN dependency source, so successful package and route evidence remains ownership-uncertain and creates no ready dependent edge. Provider installation, compatibility, package, provenance, route, and correlation failures block only the CMS-dependent branch.
+With `--cms-plan`, this command discovers a separately installed compatible `sf-plugin-cms`, performs one read-only aggregate Marketing workspace export, validates public contract, package integrity, provenance, exact correlation evidence, and explicit workspace routes, and records planning-only states. Install and verify the provider with `sf plugins install sf-plugin-cms@0.4.0`, `sf plugins inspect sf-plugin-cms --json`, and `sf cms info --contract-version 1 --json`. Version `0.4.0` is the minimum; retained contract compatibility is authoritative. Implemented and experimental capabilities can contribute visibly labeled planning evidence after all checks pass. This increment has no independently evidenced workspace/owner/field-bound MCN dependency source, so successful package and route evidence remains ownership-uncertain and creates no ready dependent edge. Provider installation, compatibility, package, provenance, route, and correlation failures block only the CMS-dependent branch.
 
 Without `--cms-plan`, no CMS subprocess runs and CMS-independent behavior is unchanged. Optional legacy CMS evidence remains minimal deferred input; it cannot override provider evidence, participate in CMS route or edge readiness, or make CMS planning executable or ready. This command never imports CMS packages, passes `--apply`, deploys, mutates either org, rewrites references, creates target payloads, performs cleanup or rollback, or reports migration as completed.
 
@@ -42,7 +42,7 @@ Optional JSON array of minimal opaque deferred CMS evidence nodes. This does not
 
 # flags.cms-plan.summary
 
-Enable planning-only discovery and one read-only aggregate Marketing workspace export through separately installed `sf-plugin-cms` 0.3.1 or later with compatible retained contracts. Requires both CMS companion flags.
+Enable planning-only discovery and one read-only aggregate Marketing workspace export through separately installed `sf-plugin-cms` 0.4.0 or later with compatible retained contracts. Requires both CMS companion flags.
 
 # flags.cms-workspace-map.summary
 

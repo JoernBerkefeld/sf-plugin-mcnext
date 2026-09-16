@@ -1,5 +1,5 @@
-import { writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { realpath, writeFile } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { runCore, type CoreRunner } from './flowCli.js';
 
 const fields = ['Name', 'Type', 'Status', 'IsActive', 'Description'];
@@ -77,6 +77,23 @@ function validateMutationIdentity(s: CampaignSelection): void {
     throw new Error('CREATE requires a fresh target-name and new journal-file');
   if (s.operation === 'update' && !text(s.expectedName)) throw new Error('UPDATE requires expected-name');
 }
+async function journalPath(projectRoot: string, declared: string): Promise<string> {
+  if (!declared || declared.includes('\0') || isAbsolute(declared))
+    throw new Error('journal-file must be a nonempty relative project path');
+  const parts = declared.replaceAll('\\', '/').split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..'))
+    throw new Error('journal-file must not contain dot or traversal segments');
+  const root = await realpath(resolve(projectRoot));
+  const target = resolve(root, declared);
+  const relation = relative(root, target);
+  if (relation === '..' || relation.startsWith(`..${sep}`) || isAbsolute(relation))
+    throw new Error('journal-file escapes the project root');
+  const parent = await realpath(dirname(target));
+  const canonicalRelation = relative(root, resolve(parent, basename(target)));
+  if (canonicalRelation === '..' || canonicalRelation.startsWith(`..${sep}`) || isAbsolute(canonicalRelation))
+    throw new Error('journal-file escapes the project root');
+  return target;
+}
 function buildPayload(s: CampaignSelection): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
   if (s.operation !== 'export') {
@@ -146,6 +163,7 @@ export async function runCampaign(s: CampaignSelection, runner: CoreRunner = run
   validateSelection(s);
   const payload = buildPayload(s);
   const cwd = resolve(s.projectRoot);
+  const resolvedJournal = s.operation === 'create' ? await journalPath(cwd, s.journalFile!) : undefined;
   const call = async (args: string[]): Promise<Record<string, unknown>> => {
     const response = await runner([...args, '--target-org', s.targetOrg, '--api-version', s.apiVersion, '--json'], cwd);
     const envelope: unknown = JSON.parse(response.stdout);
@@ -215,7 +233,7 @@ export async function runCampaign(s: CampaignSelection, runner: CoreRunner = run
     const rows = await query(`SELECT Id FROM Campaign WHERE Name = '${String(payload.Name)}' LIMIT 1`);
     if (rows.length) throw new Error('Campaign target Name already exists; CREATE never upserts');
     await writeFile(
-      resolve(cwd, s.journalFile!),
+      resolvedJournal!,
       JSON.stringify({
         state: 'pending',
         sourceId: s.artifact!.sourceId,
@@ -243,7 +261,7 @@ export async function runCampaign(s: CampaignSelection, runner: CoreRunner = run
   );
   if (s.operation === 'create')
     await writeFile(
-      resolve(cwd, s.journalFile!),
+      resolvedJournal!,
       JSON.stringify({
         state: 'created',
         sourceId: s.artifact!.sourceId,

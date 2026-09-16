@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from 'chai';
@@ -150,6 +150,36 @@ describe('Campaign bounded Core configuration adapter', () => {
         [rows([{ Id: org }]), description, rows([{ Id: id }])],
         'already exists'
       );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+  it('validates journal paths before transport and accepts a nested project path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'campaign-journal-path-'));
+    try {
+      const create: CampaignSelection = {
+        ...selection,
+        operation: 'create',
+        projectRoot: root,
+        recordId: undefined,
+        expectedName: undefined,
+        targetName: record.Name,
+        artifact: { sourceId, fields: { Name: 'Source campaign', Description: 'Before' } },
+        journalFile: 'journals/nested/identity.json',
+      };
+      expect(
+        await rejects({ ...create, journalFile: join(root, 'identity.json') }, [], 'relative project path')
+      ).to.have.length(0);
+      expect(await rejects({ ...create, journalFile: '../identity.json' }, [], 'traversal segments')).to.have.length(0);
+      await mkdir(join(root, 'journals', 'nested'), { recursive: true });
+      await runCampaign(
+        create,
+        transport([rows([{ Id: org }]), description, rows([]), saved, { ...record, Description: 'Before' }], [])
+      );
+      expect(JSON.parse(await readFile(join(root, 'journals', 'nested', 'identity.json'), 'utf8'))).to.include({
+        state: 'created',
+        targetId: id,
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

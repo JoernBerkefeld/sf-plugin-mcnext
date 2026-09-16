@@ -48,7 +48,17 @@ async function createPackage(): Promise<PackageSetup> {
     },
     completeness: 'complete',
     dependencies: [],
-    externalReferences: [],
+    externalReferences: [
+      {
+        referenceId: 'ref:canonical-provider-identity',
+        owner: 'cms',
+        kind: 'cms.content',
+        source: { workspaceId: '0ZuSource', sourceId: '20YSource' },
+        portableKey: { scheme: 'cms-opaque-v1', value: ' OPAQUE:Case-Sensitive/Value== ' },
+        required: true,
+        resolution: 'included',
+      },
+    ],
     items: [{ path: 'nested/item.json', sha256: sha256(itemBytes), kind: 'cms.content' }],
   };
   const manifestPath = join(artifact, 'manifest.json');
@@ -254,6 +264,48 @@ describe('CMS package integrity evidence', () => {
       reference: 'unresolved',
     });
     await rejects(setup, 'unresolved correlation evidence');
+  });
+
+  it('rejects missing, extra, duplicate, partial, or conflicting manifest correlation bindings', async () => {
+    const mutations = [
+      (input: Record<string, unknown>): void => {
+        const manifest = input;
+        manifest.externalReferences = [];
+      },
+      (input: Record<string, unknown>): void => {
+        const manifest = input;
+        (manifest.externalReferences as unknown[]).push({
+          referenceId: 'ref:extra',
+          owner: 'cms',
+          kind: 'cms.content',
+          source: { workspaceId: '0ZuSource', sourceId: '20YExtra' },
+          portableKey: { scheme: 'cms-opaque-v1', value: 'extra' },
+          required: true,
+          resolution: 'included',
+        });
+      },
+      (input: Record<string, unknown>): void => {
+        const manifest = input;
+        (manifest.externalReferences as unknown[]).push(structuredClone((manifest.externalReferences as unknown[])[0]));
+      },
+      (input: Record<string, unknown>): void => {
+        const manifest = input;
+        delete (manifest.externalReferences as Array<Record<string, unknown>>)[0].referenceId;
+      },
+      (input: Record<string, unknown>): void => {
+        const manifest = input;
+        (manifest.externalReferences as Array<Record<string, unknown>>)[0].referenceId = 'ref:conflict';
+      },
+    ];
+    await Promise.all(
+      mutations.map(async (mutate) => {
+        const setup = await createPackage();
+        roots.push(setup.root);
+        mutate(setup.manifest);
+        await rewriteManifest(setup);
+        await rejects(setup, 'external reference');
+      })
+    );
   });
 
   it('rejects wrong-package, duplicate, and conflicting correlation evidence', async () => {

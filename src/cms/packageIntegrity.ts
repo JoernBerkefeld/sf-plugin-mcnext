@@ -36,6 +36,12 @@ export type ValidatedCmsPackage = {
 };
 
 type ManifestItem = { path: string; sha256: string; kind: string; referenceId?: string };
+type ManifestExternalReference = {
+  workspaceId: string;
+  sourceReference: string;
+  referenceKind: string;
+  referenceId: string;
+};
 type PackageManifest = {
   contract: string;
   contractVersion: string;
@@ -47,6 +53,7 @@ type PackageManifest = {
     pluginVersion: string;
   };
   exportedCount: number;
+  externalReferences: ManifestExternalReference[];
   items: ManifestItem[];
 };
 
@@ -154,10 +161,7 @@ export async function validateCmsPackageEvidence(
   const correlations = envelope.result.externalReferenceCorrelations.filter(
     (row) => row.sourceWorkspaceId === workspace.source.sourceId
   );
-  for (const row of correlations) {
-    if (row.packageManifestSha256 !== manifestSha256) throw integrityError('correlation package identity mismatch');
-  }
-  assertUsableCorrelations(correlations);
+  assertExactCorrelationBindings(manifest.externalReferences, correlations, workspace.source.sourceId, manifestSha256);
 
   return {
     sourceWorkspaceId: workspace.source.sourceId,
@@ -222,6 +226,31 @@ function parseManifest(bytes: Buffer): PackageManifest {
       sourceWorkspaceId: text(provenance.sourceWorkspaceId, 'manifest sourceWorkspaceId'),
       pluginVersion: text(provenance.pluginVersion, 'manifest pluginVersion'),
     },
+    externalReferences: array(record.externalReferences, 'manifest externalReferences').map((referenceValue, index) => {
+      const label = `manifest external reference ${index}`;
+      const reference = exactObject(
+        referenceValue,
+        ['referenceId', 'owner', 'kind', 'source', 'portableKey', 'required', 'resolution'],
+        label
+      );
+      const source = exactObject(reference.source, ['workspaceId', 'sourceId'], `${label} source`);
+      const portableKey = exactObject(reference.portableKey, ['scheme', 'value'], `${label} portableKey`);
+      if (
+        reference.owner !== 'cms' ||
+        portableKey.scheme !== 'cms-opaque-v1' ||
+        reference.required !== true ||
+        reference.resolution !== 'included'
+      ) {
+        throw integrityError(`${label} is not an included required CMS opaque reference`);
+      }
+      text(source.sourceId, `${label} sourceId`);
+      return {
+        workspaceId: text(source.workspaceId, `${label} workspaceId`),
+        sourceReference: text(portableKey.value, `${label} opaque value`),
+        referenceKind: text(reference.kind, `${label} kind`),
+        referenceId: text(reference.referenceId, `${label} ID`),
+      };
+    }),
     items: record.items.map((itemValue, index) => {
       const item = optionalExactObject(
         itemValue,
@@ -307,23 +336,28 @@ function assertNoUnresolvedDiagnostics(envelope: CmsEnvelope<CmsExportResult>, w
   }
 }
 
-function assertUsableCorrelations(rows: CmsExternalReferenceCorrelation[]): void {
-  const sources = new Map<string, string>();
-  const references = new Map<string, string>();
-  for (const row of rows) {
-    const binding = `${row.referenceKind}\0${row.referenceId}\0${row.packageManifestSha256}`;
-    const sourcePrior = sources.get(row.sourceReference);
-    if (sourcePrior !== undefined)
-      throw integrityError(
-        sourcePrior === binding ? 'duplicate correlation evidence' : 'conflicting correlation evidence'
-      );
-    sources.set(row.sourceReference, binding);
-    const referenceBinding = `${row.sourceReference}\0${row.referenceKind}\0${row.packageManifestSha256}`;
-    const referencePrior = references.get(row.referenceId);
-    if (referencePrior !== undefined && referencePrior !== referenceBinding)
-      throw integrityError('conflicting referenceId evidence');
-    references.set(row.referenceId, referenceBinding);
+function assertExactCorrelationBindings(
+  references: ManifestExternalReference[],
+  rows: CmsExternalReferenceCorrelation[],
+  workspaceId: string,
+  manifestSha256: string
+): void {
+  const expected = new Set<string>();
+  for (const reference of references) {
+    if (reference.workspaceId !== workspaceId) throw integrityError('manifest external reference workspace mismatch');
+    const binding = `${reference.sourceReference}\0${reference.referenceKind}\0${reference.referenceId}`;
+    if (expected.has(binding)) throw integrityError('duplicate manifest external reference');
+    expected.add(binding);
   }
+  const actual = new Set<string>();
+  for (const row of rows) {
+    if (row.packageManifestSha256 !== manifestSha256) throw integrityError('correlation package identity mismatch');
+    const binding = `${row.sourceReference}\0${row.referenceKind}\0${row.referenceId}`;
+    if (actual.has(binding)) throw integrityError('duplicate correlation evidence');
+    actual.add(binding);
+  }
+  if (expected.size !== actual.size || [...expected].some((binding) => !actual.has(binding)))
+    throw integrityError('manifest external references do not exactly match correlation evidence');
 }
 
 async function assertNoReparsePath(root: string, target: string, targetDirectory: boolean): Promise<void> {
@@ -411,6 +445,11 @@ async function safeLstat(path: string, label: string): Promise<Awaited<ReturnTyp
   } catch {
     throw integrityError(`${label} is unavailable`);
   }
+}
+
+function array(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) throw integrityError(`${label} must be an array`);
+  return value;
 }
 
 function object(value: unknown, label: string): Record<string, unknown> {

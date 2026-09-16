@@ -22,20 +22,20 @@ export const validInfoFixture: CmsEnvelope<CmsInfoResult> = {
   status: 'success',
   metadata: {
     operation: 'cms.info',
-    plugin: { name: 'sf-plugin-cms', version: '0.3.1' },
+    plugin: { name: 'sf-plugin-cms', version: '0.4.0' },
     apiVersion: null,
   },
   diagnostics: { warnings: [], errors: [] },
   provenance: {
     producer: 'sf-plugin-cms',
     sourceOrgId: 'offline',
-    pluginVersion: '0.3.1',
+    pluginVersion: '0.4.0',
     exportSetId: 'info:contract-transcribed',
     command: 'sf cms info',
     generatedAt: '2026-09-13T18:00:00.000Z',
   },
   result: {
-    plugin: { name: 'sf-plugin-cms', version: '0.3.1' },
+    plugin: { name: 'sf-plugin-cms', version: '0.4.0' },
     api: { defaultVersion: '67.0', testedVersions: ['67.0'] },
     contracts: {
       commandResults: {
@@ -110,14 +110,14 @@ export const validExportFixture: CmsEnvelope<CmsExportResult> = {
   status: 'success',
   metadata: {
     operation: 'workspace.export.bulk',
-    plugin: { name: 'sf-plugin-cms', version: '0.3.1' },
+    plugin: { name: 'sf-plugin-cms', version: '0.4.0' },
     apiVersion: '67.0',
   },
   diagnostics: { warnings: [], errors: [] },
   provenance: {
     producer: 'sf-plugin-cms',
     sourceOrgId: '00DSource',
-    pluginVersion: '0.3.1',
+    pluginVersion: '0.4.0',
     exportSetId: 'export-set:contract-transcribed',
     command: 'sf cms export workspace',
     generatedAt: '2026-09-13T18:00:00.000Z',

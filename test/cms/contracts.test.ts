@@ -37,14 +37,14 @@ describe('CMS public contract boundary', () => {
       command: 'sf cms info --contract-version 1 --json',
     });
     expect(publishedInfoFixture.provenance).not.to.have.property('exportSetId');
-    rejects(() => validateCmsInfo(publishedInfoFixture), 'CMS plugin must be at least 0.3.1');
+    rejects(() => validateCmsInfo(publishedInfoFixture), 'CMS plugin must be at least 0.4.0');
   });
 
   it('keeps retained contract validation authoritative for later plugin versions', () => {
     const later = cloneFixture(validInfoFixture);
-    later.metadata.plugin.version = '0.3.2';
-    later.provenance.pluginVersion = '0.3.2';
-    later.result!.plugin.version = '0.3.2';
+    later.metadata.plugin.version = '0.4.1';
+    later.provenance.pluginVersion = '0.4.1';
+    later.result!.plugin.version = '0.4.1';
     expect(() => validateCmsInfo(later)).to.not.throw();
 
     later.result!.contracts.commandResults.workspaceExportSet = ['2.0.0'];

@@ -31,12 +31,12 @@ sf plugins
 The CMS provider is optional for CMS-independent commands. Install it separately only when you intend to use `sf mcnext migration plan --cms-plan`:
 
 ```bash
-sf plugins install sf-plugin-cms@0.3.1
+sf plugins install sf-plugin-cms@0.4.0
 sf plugins inspect sf-plugin-cms --json
 sf cms info --contract-version 1 --json
 ```
 
-CMS planning requires `sf-plugin-cms` version `0.3.1` or later, but version alone is not sufficient. The provider must be discoverable by the same `sf` executable and advertise compatible command-result and package-manifest contracts, capability `workspace.export.external-reference-correlation`, and correlation contract `sf-cms-external-reference-correlations@1`. A newer provider is accepted only when those retained contracts and semantics remain compatible.
+CMS planning requires `sf-plugin-cms` version `0.4.0` or later, but version alone is not sufficient. The provider must be discoverable by the same `sf` executable and advertise compatible command-result and package-manifest contracts, capability `workspace.export.external-reference-correlation`, and correlation contract `sf-cms-external-reference-correlations@1`. A newer provider is accepted only when those retained contracts and semantics remain compatible.
 
 If the provider is missing, too old, newer but incompatible, unavailable, malformed, or missing required provenance/correlation evidence, CMS-dependent planning fails closed. CMS-independent commands and a migration plan without `--cms-plan` remain available.
 

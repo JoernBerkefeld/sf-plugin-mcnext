@@ -41,7 +41,7 @@ describe('mcnext list types', () => {
     expect(result[0]).to.include({ provider: 'cms-service', state: 'conditional', delegatedTo: '' });
     expect(result[0]?.operations).to.deep.equal(['export']);
     expect(result[0]?.limitation).to.contain('sf mcnext migration plan --cms-plan');
-    expect(result[0]?.limitation).to.contain('separately installed sf-plugin-cms >=0.3.1 versioned CLI contract');
+    expect(result[0]?.limitation).to.contain('separately installed sf-plugin-cms >=0.4.0 versioned CLI contract');
     expect(result[0]?.limitation).to.contain(
       'MCN owns no CMS content retrieval, import, deployment, payload rewriting, or execution'
     );

@@ -1,5 +1,5 @@
 export const CMS_PLUGIN_NAME = 'sf-plugin-cms' as const;
-export const CMS_MINIMUM_PLUGIN_VERSION = '0.3.1' as const;
+export const CMS_MINIMUM_PLUGIN_VERSION = '0.4.0' as const;
 export const CMS_INFO_CONTRACT = 'sf-cms-info' as const;
 export const CMS_EXPORT_CONTRACT = 'sf-cms-workspace-export-set' as const;
 export const CMS_CORRELATION_CONTRACT = 'sf-cms-external-reference-correlations@1' as const;

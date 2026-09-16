@@ -161,7 +161,7 @@ describe('mcnext migration plan', () => {
       manifestPath: join(exportDirectory, 'Marketing Workspace', 'manifest.json'),
       packageManifestSha256: packageHash,
       sourceOrgId: '00Dsource',
-      pluginVersion: '0.3.1',
+      pluginVersion: '0.4.0',
       exportSetId: exported.provenance.exportSetId!,
       correlations: exported.result!.externalReferenceCorrelations,
     });
@@ -230,7 +230,7 @@ describe('mcnext migration plan', () => {
       manifestPath: 'a/manifest.json',
       packageManifestSha256: exported.result!.workspaces[0].artifact.manifestSha256,
       sourceOrgId: '00Dsource',
-      pluginVersion: '0.3.1',
+      pluginVersion: '0.4.0',
       exportSetId: exported.provenance.exportSetId!,
       correlations: exported.result!.externalReferenceCorrelations,
     });
@@ -276,7 +276,7 @@ describe('mcnext migration plan', () => {
           manifestPath: 'a/manifest.json',
           packageManifestSha256: exported.result!.workspaces[0].artifact.manifestSha256,
           sourceOrgId: '00Dsource',
-          pluginVersion: '0.3.1',
+          pluginVersion: '0.4.0',
           exportSetId: exported.provenance.exportSetId!,
           correlations: [],
         });
@@ -335,7 +335,7 @@ describe('mcnext migration plan', () => {
           manifestPath: 'a/manifest.json',
           packageManifestSha256: exported.result!.workspaces[0].artifact.manifestSha256,
           sourceOrgId: '00Dsource',
-          pluginVersion: '0.3.1',
+          pluginVersion: '0.4.0',
           exportSetId: exported.provenance.exportSetId!,
           correlations: [],
         });
@@ -395,7 +395,7 @@ describe('mcnext migration plan', () => {
           manifestPath: 'a/manifest.json',
           packageManifestSha256: workspace.artifact.manifestSha256,
           sourceOrgId: '00Dsource',
-          pluginVersion: '0.3.1',
+          pluginVersion: '0.4.0',
           exportSetId: exported.provenance.exportSetId!,
           correlations: exported.result!.externalReferenceCorrelations,
         };
@@ -437,7 +437,7 @@ describe('mcnext migration plan', () => {
     ).to.include('CMS_ROUTE_MISSING');
   });
 
-  it('records a fully blocked result when routed package evidence fails validation', async () => {
+  it('records a fully blocked result when manifest external-reference bindings fail validation', async () => {
     const workspaceMap = join(directory, 'map.json');
     const output = join(directory, 'blocked.json');
     await writeFile(workspaceMap, '{"version":1,"workspaces":{"0ZuSource":"0ZuTarget"}}', 'utf8');
@@ -448,7 +448,9 @@ describe('mcnext migration plan', () => {
       capabilities: { bulkExport: 'implemented', externalReferenceCorrelation: 'experimental', experimental: true },
     });
     $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
-    $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage').rejects(new Error('manifest hash mismatch'));
+    $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage').rejects(
+      new Error('manifest external references do not exactly match correlation evidence')
+    );
     const result = await MigrationPlanCommand.run([
       '--source-org',
       'source',
@@ -474,7 +476,7 @@ describe('mcnext migration plan', () => {
     expect(plan.cmsPlanning.routes[0]).to.deep.include({ state: 'blocked' });
     expect(plan.cmsPlanning.routes[0].diagnostics[0]).to.include({
       code: 'CMS_PACKAGE_INVALID',
-      message: 'manifest hash mismatch',
+      message: 'manifest external references do not exactly match correlation evidence',
     });
   });
 

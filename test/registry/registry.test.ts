@@ -26,7 +26,7 @@ describe('type registry', () => {
     expect(getType('cmsContent')?.operations).to.deep.equal(['export']);
     expect(getType('cmsContent')?.limitation).to.contain('sf mcnext migration plan --cms-plan');
     expect(getType('cmsContent')?.limitation).to.contain(
-      'separately installed sf-plugin-cms >=0.3.1 versioned CLI contract'
+      'separately installed sf-plugin-cms >=0.4.0 versioned CLI contract'
     );
     expect(getType('cmsContent')?.limitation).to.contain(
       'MCN owns no CMS content retrieval, import, deployment, payload rewriting, or execution'

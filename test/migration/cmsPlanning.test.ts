@@ -54,14 +54,14 @@ describe('CMS planning', () => {
     const base = {
       state: 'partial' as const,
       capabilities: {
-        pluginVersion: '0.3.1',
+        pluginVersion: '0.4.0',
         bulkExport: 'implemented' as const,
         externalReferenceCorrelation: 'experimental' as const,
         experimental: true,
       },
       exportProvenance: {
         sourceOrgId: '00Dsource',
-        pluginVersion: '0.3.1',
+        pluginVersion: '0.4.0',
         exportSetId: 'export-1',
         command: 'sf cms export workspace',
         generatedAt: '2026-09-13T20:00:00.000Z',
@@ -123,14 +123,14 @@ describe('CMS planning', () => {
     const input = {
       state: 'blocked' as const,
       capabilities: {
-        pluginVersion: '0.3.1',
+        pluginVersion: '0.4.0',
         bulkExport: 'implemented' as const,
         externalReferenceCorrelation: 'implemented' as const,
         experimental: false,
       },
       exportProvenance: {
         sourceOrgId: '00Dsource',
-        pluginVersion: '0.3.1',
+        pluginVersion: '0.4.0',
         exportSetId: 'export-1',
         command: 'sf cms export workspace',
         generatedAt: '2026-09-13T20:00:00.000Z',
@@ -169,14 +169,14 @@ describe('CMS planning', () => {
     const common = {
       state: 'blocked' as const,
       capabilities: {
-        pluginVersion: '0.3.1',
+        pluginVersion: '0.4.0',
         bulkExport: 'implemented' as const,
         externalReferenceCorrelation: 'implemented' as const,
         experimental: false,
       },
       exportProvenance: {
         sourceOrgId: '00Dsource',
-        pluginVersion: '0.3.1',
+        pluginVersion: '0.4.0',
         exportSetId: 'export-1',
         command: 'sf cms export workspace',
         generatedAt: '2026-09-13T20:00:00.000Z',
