@@ -4,7 +4,7 @@ import { runCore, type CoreRunner } from './flowCli.js';
 
 const fields = ['Name', 'Type', 'Status', 'IsActive', 'Description'];
 const relationships = ['ParentId', 'RecordTypeId', 'BriefId', 'CampaignImageId', 'CampaignMemberRecordTypeId'];
-const preserved = [
+const preservationProjection = [
   ...fields,
   ...relationships,
   'OwnerId',
@@ -14,8 +14,6 @@ const preserved = [
   'ExpectedRevenue',
   'BudgetedCost',
   'ActualCost',
-  'External_ID__c',
-  'Stage',
 ];
 export type CampaignArtifact = { sourceId: string; fields: Record<string, unknown> };
 export type CampaignSelection = {
@@ -27,6 +25,7 @@ export type CampaignSelection = {
   recordId?: string;
   expectedName?: string;
   targetName?: string;
+  expectUnchanged?: boolean;
   artifact?: CampaignArtifact;
   journalFile?: string;
 };
@@ -65,9 +64,9 @@ function validateSelection(s: CampaignSelection): void {
     throw new Error('Exact 18-character Campaign record ID required');
   const forbidden =
     s.operation === 'export'
-      ? [s.artifact, s.targetName, s.expectedName, s.journalFile]
+      ? [s.artifact, s.targetName, s.expectedName, s.expectUnchanged, s.journalFile]
       : s.operation === 'create'
-      ? [s.recordId, s.expectedName]
+      ? [s.recordId, s.expectedName, s.expectUnchanged]
       : [s.targetName, s.journalFile];
   if (forbidden.some((value) => value !== undefined)) throw new Error('Unexpected Campaign operation inputs');
   validateMutationIdentity(s);
@@ -76,6 +75,8 @@ function validateMutationIdentity(s: CampaignSelection): void {
   if (s.operation === 'create' && (!text(s.targetName) || !s.journalFile))
     throw new Error('CREATE requires a fresh target-name and new journal-file');
   if (s.operation === 'update' && !text(s.expectedName)) throw new Error('UPDATE requires expected-name');
+  if (s.expectUnchanged !== undefined && typeof s.expectUnchanged !== 'boolean')
+    throw new Error('expect-unchanged must be boolean');
 }
 async function journalPath(projectRoot: string, declared: string): Promise<string> {
   if (!declared || declared.includes('\0') || isAbsolute(declared))
@@ -147,6 +148,13 @@ function validateFields(
   }
   return definitions;
 }
+function assertCreateRelationshipProjection(record: Record<string, unknown>): void {
+  if (relationships.some((field) => !Object.hasOwn(record, field)))
+    throw new Error('Campaign CREATE readback lacks required relationship projection; reconcile before retrying');
+  if (relationships.some((field) => record[field] !== null))
+    throw new Error('Campaign CREATE readback contains unsupported relationships; reconcile before retrying');
+}
+
 function saveId(saved: Record<string, unknown>, s: CampaignSelection): string {
   if (
     saved.success !== true ||
@@ -206,6 +214,15 @@ export async function runCampaign(s: CampaignSelection, runner: CoreRunner = run
     sourceId: String(record.Id),
     fields: Object.fromEntries(fields.filter((field) => record[field] !== null).map((field) => [field, record[field]])),
   });
+  const assertPreservationProjection = (record: Record<string, unknown>, stage: 'baseline' | 'readback'): void => {
+    const missing = preservationProjection.filter((field) => !Object.hasOwn(record, field));
+    if (missing.length)
+      throw new Error(
+        stage === 'baseline'
+          ? 'Campaign UPDATE baseline lacks required preservation fields'
+          : 'Campaign UPDATE readback lacks required preservation fields; reconcile before retrying'
+      );
+  };
   if (s.operation === 'export') {
     const record = await get(s.recordId!);
     if (relationships.some((field) => record[field] !== null && record[field] !== undefined))
@@ -217,7 +234,10 @@ export async function runCampaign(s: CampaignSelection, runner: CoreRunner = run
   let baseline: Record<string, unknown> | undefined;
   if (s.operation === 'update') {
     baseline = await get(s.recordId!);
+    assertPreservationProjection(baseline, 'baseline');
     if (baseline.Name !== s.expectedName) throw new Error('Campaign target identity/name mismatch');
+    if (s.expectUnchanged === true && Object.entries(payload).some(([key, value]) => baseline?.[key] !== value))
+      throw new Error('Repeated unchanged Campaign UPDATE payload differs from the independent baseline');
   } else {
     if (
       definitions.some(
@@ -272,9 +292,13 @@ export async function runCampaign(s: CampaignSelection, runner: CoreRunner = run
       { mode: 0o600 }
     );
   const after = await get(targetId);
+  if (s.operation === 'create') assertCreateRelationshipProjection(after);
   for (const [key, value] of Object.entries(payload))
     if (after[key] !== value) throw new Error(`Campaign readback mismatch for ${key}; reconcile before retrying`);
-  if (baseline && preserved.some((key) => !Object.hasOwn(payload, key) && baseline[key] !== after[key]))
-    throw new Error('Campaign UPDATE preservation failed; reconcile before retrying');
+  if (baseline) {
+    assertPreservationProjection(after, 'readback');
+    if (preservationProjection.some((key) => !Object.hasOwn(payload, key) && !Object.is(baseline[key], after[key])))
+      throw new Error('Campaign UPDATE preservation failed; reconcile before retrying');
+  }
   return { operation: s.operation, targetId, artifact: artifact(after) };
 }

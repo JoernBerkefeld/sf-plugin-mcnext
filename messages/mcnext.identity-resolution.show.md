@@ -10,7 +10,7 @@ Returns the bare ruleset configuration object from the verified v67 endpoint, se
 
 - Show one ruleset configuration:
 
-  <%= config.bin %> <%= command.id %> --target-org my-org --ruleset-id 1iraj000000VkBeAAK
+  <%= config.bin %> <%= command.id %> --target-org my-org --ruleset-id 1ir000000000001AAA
 
 # flags.target-org.summary
 

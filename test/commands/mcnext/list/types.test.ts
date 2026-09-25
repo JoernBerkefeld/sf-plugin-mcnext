@@ -24,14 +24,17 @@ describe('mcnext list types', () => {
 
   it('filters MCN-owned capabilities with explicit support boundaries', async () => {
     const result = await ListTypes.run(['--provider', 'mcnext']);
-    expect(result.length).to.equal(3);
-    expect(result.filter((row) => row.state === 'implemented').length).to.equal(2);
+    expect(result.length).to.equal(7);
+    expect(result.filter((row) => row.state === 'implemented').length).to.equal(7);
     expect(result.find((row) => row.name === 'identityResolution')?.operations).to.deep.equal([
       'list',
       'retrieve',
       'export',
+      'plan',
     ]);
-    expect(result.find((row) => row.name === 'identityResolution')?.limitation).to.contain('Configuration only');
+    expect(result.find((row) => row.name === 'identityResolution')?.limitation).to.contain('GET-only');
+    expect(result.find((row) => row.name === 'marketSegmentDefinition')?.operations).to.deep.equal(['create']);
+    expect(result.find((row) => row.name === 'marketSegmentDefinition')?.limitation).to.contain('Strict CREATE');
     expect(result.every((row) => row.delegatedTo === '')).to.equal(true);
   });
 
@@ -49,7 +52,9 @@ describe('mcnext list types', () => {
 
   it('names the exact core command for delegated metadata', async () => {
     const result = await ListTypes.run(['--provider', 'core-sf']);
-    const flow = result.find((row) => row.name === 'flow');
-    expect(flow?.delegatedTo).to.equal('sf project retrieve start -m Flow');
+    const flowDefinition = result.find((row) => row.name === 'flowDefinition');
+    expect(flowDefinition?.delegatedTo).to.equal('sf project retrieve start -m FlowDefinition');
+    const email = result.find((row) => row.name === 'listEmail');
+    expect(email?.delegatedTo).to.equal('sf data get record --sobject ListEmail');
   });
 });

@@ -33,6 +33,7 @@ export default class FlowSource extends SfCommand<FlowResult> {
     'reuse-same-org-references': Flags.boolean({
       summary: messages.getMessage('flags.reuse-same-org-references.summary'),
     }),
+    'expect-unchanged': Flags.boolean({ summary: messages.getMessage('flags.expect-unchanged.summary') }),
     wait: Flags.integer({ summary: messages.getMessage('flags.wait.summary'), min: 1, max: 30, default: 10 }),
   };
 
@@ -50,7 +51,9 @@ export default class FlowSource extends SfCommand<FlowResult> {
       throw new Error('Mutation flags require operation create or update');
     if (
       flags.operation !== 'update' &&
-      (flags['expected-definition-id'] !== undefined || flags['expected-latest-version-id'] !== undefined)
+      (flags['expected-definition-id'] !== undefined ||
+        flags['expected-latest-version-id'] !== undefined ||
+        flags['expect-unchanged'] === true)
     )
       throw new Error('Target baseline flags require operation update');
     const selection = {
@@ -69,6 +72,7 @@ export default class FlowSource extends SfCommand<FlowResult> {
         ...selection,
         expectedDefinitionId: flags['expected-definition-id'] ?? '',
         expectedLatestVersionId: flags['expected-latest-version-id'] ?? '',
+        expectUnchanged: flags['expect-unchanged'],
       });
     else if (flags.operation === 'create') result = await createFlow(selection);
     else

@@ -23,6 +23,10 @@ UPDATE only: verified existing 18-character FlowDefinition ID.
 
 UPDATE only: verified current 18-character latest Flow version ID.
 
+# flags.expect-unchanged.summary
+
+UPDATE only: permit an exact unchanged baseline repeat and require Core to report exactly the selected Flow member as Unchanged before independent semantic readback. Without this flag, UPDATE requires a top-level label and/or interviewLabel change and Core state Changed.
+
 # flags.source-file.summary
 
 CREATE/UPDATE: inactive Core Flow XML inside a configured package directory.

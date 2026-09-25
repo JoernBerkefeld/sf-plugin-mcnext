@@ -12,6 +12,8 @@ export type RequestOptions = {
   query?: Record<string, string | number | boolean | undefined>;
   itemsKey?: string;
   pageSizeParam?: string;
+  requireItemsKey?: boolean;
+  requireCompletePagination?: boolean;
 };
 
 export type PaginationLimits = {
@@ -60,21 +62,58 @@ function assertItemLimit(itemCount: number, maxItems: number): void {
   }
 }
 
+function assertNonnegativeInteger(value: unknown, label: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new SfError(`Pagination ${label} must be a finite nonnegative integer.`, 'PaginationEnvelopeError');
+  }
+}
+
+function assertPositiveInteger(value: unknown, label: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw new SfError(`Pagination ${label} must be a finite positive integer.`, 'PaginationEnvelopeError');
+  }
+}
+
+function validateCompletePage(
+  pageOffset: unknown,
+  servedPageSize: unknown,
+  totalItems: unknown,
+  currentOffset: number,
+  itemCount: number
+): void {
+  assertNonnegativeInteger(totalItems, 'total count');
+  assertNonnegativeInteger(pageOffset, 'offset');
+  assertPositiveInteger(servedPageSize, 'page size');
+  if (pageOffset !== currentOffset) {
+    throw new SfError('Pagination metadata is inconsistent with the requested page.', 'PaginationEnvelopeError');
+  }
+  if (pageOffset + itemCount > totalItems) {
+    throw new SfError('Pagination page exceeds the declared total count.', 'PaginationEnvelopeError');
+  }
+  if (pageOffset + itemCount < totalItems && itemCount !== servedPageSize) {
+    throw new SfError('Pagination returned a premature short page before the declared total.', 'PaginationEnvelopeError');
+  }
+}
+
 function getNextOffset(
   page: PagedEnvelope,
   itemCount: number,
   requestedPageSize: number,
   pageSizeParam: string | undefined,
-  currentOffset: number
+  currentOffset: number,
+  requireCompletePagination = false
 ): number | undefined {
   const pageOffset = page.offset ?? page.offSet;
-  const servedPageSize = page.batchSize ?? page.limit ?? requestedPageSize;
+  const servedPageSize = page.batchSize ?? page.limit;
   const totalItems = page.totalSize ?? page.totalCount;
-  const moreItems = totalItems === undefined || (pageOffset ?? 0) + itemCount < totalItems;
-  if (!pageSizeParam || typeof pageOffset !== 'number' || itemCount !== servedPageSize || !moreItems) {
-    return undefined;
+  if (requireCompletePagination) {
+    validateCompletePage(pageOffset, servedPageSize, totalItems, currentOffset, itemCount);
   }
-  const nextOffset = pageOffset + servedPageSize;
+
+  const effectivePageSize = servedPageSize ?? requestedPageSize;
+  const hasMore = totalItems === undefined || (pageOffset ?? 0) + itemCount < totalItems;
+  if (!pageSizeParam || typeof pageOffset !== 'number' || itemCount !== effectivePageSize || !hasMore) return undefined;
+  const nextOffset = pageOffset + effectivePageSize;
   if (nextOffset <= currentOffset) {
     throw new SfError(`Pagination offset did not advance beyond ${currentOffset}.`, 'PaginationLoopError');
   }
@@ -83,10 +122,7 @@ function getNextOffset(
 
 /** Thin wrapper around a Salesforce connection for retained MCN v1 REST calls. */
 export class McnClient {
-  private constructor(
-    private readonly connection: Connection,
-    public readonly apiVersion: string
-  ) {}
+  private constructor(private readonly connection: Connection, public readonly apiVersion: string) {}
 
   /** Build a client pinned to the tested v67 baseline. */
   public static async create(org: Org, apiVersion = TESTED_API_VERSION): Promise<McnClient> {
@@ -124,9 +160,12 @@ export class McnClient {
     return new SfError(`Request failed (${context})`, 'McnRequestError');
   }
 
-  private static extractBatch<T>(page: PagedEnvelope, itemsKey?: string): T[] {
+  private static extractBatch<T>(page: PagedEnvelope, itemsKey?: string, requireItemsKey = false): T[] {
     if (itemsKey) {
       const declared = page[itemsKey];
+      if (requireItemsKey && !Array.isArray(declared)) {
+        throw new SfError(`Pagination response is missing array property "${itemsKey}".`, 'PaginationEnvelopeError');
+      }
       return Array.isArray(declared) ? (declared as T[]) : [];
     }
     if (Array.isArray(page.records)) {
@@ -159,7 +198,9 @@ export class McnClient {
   ): AsyncGenerator<T[]> {
     const effective = { ...DEFAULT_LIMITS, ...limits };
     const started = Date.now();
-    const requestedPageSize = options.pageSizeParam ? Number(options.query?.[options.pageSizeParam] ?? pageSize) : pageSize;
+    const requestedPageSize = options.pageSizeParam
+      ? Number(options.query?.[options.pageSizeParam] ?? pageSize)
+      : pageSize;
     const visitedPointers = new Set<string>();
     let state: PaginationState = { emitted: 0, pageCount: 0, offset: Number(options.query?.offset ?? 0) };
 
@@ -168,31 +209,36 @@ export class McnClient {
       /* eslint-disable no-await-in-loop -- every request depends on the prior response cursor */
       const page = await this.fetchPage(options, requestedPageSize, state);
       /* eslint-enable no-await-in-loop */
-      const batch = McnClient.extractBatch<T>(page, options.itemsKey);
+      const batch = McnClient.extractBatch<T>(page, options.itemsKey, options.requireItemsKey);
       const emitted = state.emitted + batch.length;
       assertItemLimit(emitted, effective.maxItems);
       state = { ...state, emitted, pageCount: state.pageCount + 1 };
       yield batch;
 
+      const offset = getNextOffset(
+        page,
+        batch.length,
+        requestedPageSize,
+        options.pageSizeParam,
+        state.offset,
+        options.requireCompletePagination
+      );
       const pointer = page.nextPageUrl ?? page.nextPageUri ?? page.nextRecordsUrl;
       if (pointer) {
-        state = { ...state, next: this.acceptPointer(pointer, visitedPointers) };
+        state = {
+          ...state,
+          ...(offset === undefined ? {} : { offset }),
+          next: this.acceptPointer(pointer, visitedPointers, options.requireCompletePagination ? offset : undefined),
+        };
         continue;
       }
-      const offset = getNextOffset(page, batch.length, requestedPageSize, options.pageSizeParam, state.offset);
-      if (offset === undefined) {
-        return;
-      }
+      if (offset === undefined) return;
       state = { ...state, offset, next: undefined };
     }
   }
 
   /** Follow every bounded page and concatenate its items. */
-  public async requestAll<T>(
-    options: RequestOptions,
-    pageSize = 200,
-    limits: PaginationLimits = {}
-  ): Promise<T[]> {
+  public async requestAll<T>(options: RequestOptions, pageSize = 200, limits: PaginationLimits = {}): Promise<T[]> {
     const collected: T[] = [];
     for await (const page of this.requestPages<T>(options, pageSize, limits)) {
       collected.push(...page);
@@ -213,10 +259,16 @@ export class McnClient {
     });
   }
 
-  private acceptPointer(pointer: string, visited: Set<string>): string {
+  private acceptPointer(pointer: string, visited: Set<string>, expectedOffset?: number): string {
     const normalized = this.normalizePointer(pointer);
     if (visited.has(normalized)) {
       throw new SfError(`Pagination repeated pointer ${normalized}.`, 'PaginationLoopError');
+    }
+    if (expectedOffset !== undefined) {
+      const pointerOffset = Number(new URL(normalized, 'https://pagination.invalid').searchParams.get('offset'));
+      if (!Number.isSafeInteger(pointerOffset) || pointerOffset !== expectedOffset) {
+        throw new SfError('Pagination pointer does not advance to the expected offset.', 'PaginationEnvelopeError');
+      }
     }
     visited.add(normalized);
     return normalized;

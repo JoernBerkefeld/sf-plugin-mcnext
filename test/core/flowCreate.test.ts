@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect } from 'chai';
@@ -94,6 +94,10 @@ describe('bounded Flow CREATE', () => {
     'pending-validation',
     'failed-create',
     'pending-create',
+    'missing-readback-package-directory',
+    'missing-readback',
+    'readback-mismatch',
+    'active-after',
     'bad-source',
   ] as const) {
     it(`handles ${scenario} without implicit upsert or unsafe apply`, async () => {
@@ -111,23 +115,67 @@ describe('bounded Flow CREATE', () => {
           scenario === 'bad-source' ? fixture.replace('Draft', 'Active') : source
         );
         let absence = 0;
+        // eslint-disable-next-line complexity -- scenario matrix intentionally exercises all CREATE safety branches
         const runner: CoreRunner = async (args, cwd) => {
           calls.push(args);
           if (args[0] === 'data') {
-            const org = args.includes('SELECT Id FROM Organization');
-            if (!org) absence++;
+            const soql = args[args.indexOf('--query') + 1];
+            const org = soql.includes('Organization');
+            const deployment = soql.includes('DeployRequest');
+            if (!org && !deployment) absence++;
             const records = org
               ? [{ Id: scenario === 'wrong-org' ? 'wrong' : orgId }]
+              : deployment
+              ? []
+              : soql.includes('Id, LatestVersionId, ActiveVersionId')
+              ? [
+                  {
+                    Id: '300000000000000AAA',
+                    LatestVersionId: '301000000000000AAA',
+                    ActiveVersionId: scenario === 'active-after' ? '301000000000000AAA' : null,
+                  },
+                ]
               : scenario === 'conflict' || (scenario === 'late-conflict' && absence === 2)
               ? [{ Id: 'exists' }]
               : [];
             return response({ records, totalSize: records.length, done: scenario !== 'incomplete' });
           }
           expect(cwd).not.to.equal(root);
-          expect(await readFile(join(cwd, 'custom/main/default/flows', `${member}.flow-meta.xml`), 'utf8')).to.equal(
-            source
-          );
+          const flowPath = join(cwd, 'custom/main/default/flows', `${member}.flow-meta.xml`);
+          if (args[1] !== 'retrieve') expect(await readFile(flowPath, 'utf8')).to.equal(source);
           expect(args).to.include(`Flow:${member}`).and.not.to.include('--ignore-conflicts');
+          const retrieve = args[1] === 'retrieve';
+          if (retrieve) {
+            expect(await readFile(join(cwd, 'sfdx-project.json'), 'utf8')).to.equal(
+              JSON.stringify({ packageDirectories: [{ path: 'custom', default: true }] })
+            );
+            expect((await stat(join(cwd, 'custom'))).isDirectory()).to.equal(true);
+            if (scenario === 'missing-readback-package-directory') {
+              await rm(join(cwd, 'custom'), { recursive: true, force: true });
+              return response(
+                {
+                  name: 'MissingPackageDirectoryError',
+                  message: 'The configured package directory does not exist',
+                },
+                1
+              );
+            }
+            if (scenario !== 'missing-readback')
+              await mkdir(join(cwd, 'custom/main/default/flows'), { recursive: true });
+            if (scenario !== 'missing-readback')
+              await writeFile(
+                flowPath,
+                scenario === 'readback-mismatch' ? source.replace('InvalidDraft', 'Draft') : source
+              );
+            return response({
+              id: 'retrieve-job',
+              checkOnly: false,
+              status: 'Succeeded',
+              done: true,
+              success: true,
+              files: [{ type: 'Flow', fullName: member, state: 'Changed', filePath: 'custom/flow' }],
+            });
+          }
           const dry = args.includes('--dry-run');
           const pending = (dry && scenario === 'pending-validation') || (!dry && scenario === 'pending-create');
           if (pending) return response({ id: 'job', status: 'InProgress', done: false, success: false }, 69);
@@ -160,14 +208,26 @@ describe('bounded Flow CREATE', () => {
         } catch (caught) {
           error = caught;
         }
-        const apply = calls.filter((args) => args[0] === 'project' && !args.includes('--dry-run'));
+        const apply = calls.filter(
+          (args) => args[0] === 'project' && args[1] === 'deploy' && !args.includes('--dry-run')
+        );
         if (scenario === 'success' || scenario === 'pending-create') {
           expect(error).to.equal(undefined);
           expect(state).to.equal(scenario === 'success' ? 'succeeded' : 'pending');
           expect(apply.length).to.equal(1);
         } else {
           expect(error).to.be.instanceOf(Error);
-          expect(apply.length).to.equal(scenario === 'failed-create' ? 1 : 0);
+          expect(apply.length).to.equal(
+            [
+              'failed-create',
+              'missing-readback-package-directory',
+              'missing-readback',
+              'readback-mismatch',
+              'active-after',
+            ].includes(scenario)
+              ? 1
+              : 0
+          );
         }
       } finally {
         await rm(root, { recursive: true, force: true });

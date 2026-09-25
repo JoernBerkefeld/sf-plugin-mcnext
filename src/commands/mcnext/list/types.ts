@@ -51,7 +51,8 @@ export default class ListTypes extends SfCommand<ListTypesResult> {
 }
 
 /** Render the core command family for a delegated capability. */
-function describeDelegation(delegation?: { metadataType?: string; sObject?: string }): string {
+function describeDelegation(delegation?: { command?: string; metadataType?: string; sObject?: string }): string {
+  if (delegation?.command) return delegation.command;
   if (delegation?.metadataType) {
     return `sf project retrieve start -m ${delegation.metadataType}`;
   }

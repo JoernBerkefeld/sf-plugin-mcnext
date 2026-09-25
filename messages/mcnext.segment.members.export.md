@@ -12,11 +12,11 @@ Rows are written incrementally as CSV or JSON. The API member `id` is preserved 
 
 - Export members by segment API name as CSV:
 
-  <%= config.bin %> <%= command.id %> --target-org my-org --segment Annual_Promo_Segment_1789248847753 --output-file members.csv
+  <%= config.bin %> <%= command.id %> --target-org my-org --segment My_Published_Segment --output-file members.csv
 
 - Select a segment by MarketSegment ID and export JSON with verified request options:
 
-  <%= config.bin %> <%= command.id %> --target-org my-org --segment 1sg000000000001 --output-file members.json --result-format json --fields Id__c,Delta_Type__c --filters "Delta_Type__c in ('new')" --order-by "Id__c asc" --limit 100
+  <%= config.bin %> <%= command.id %> --target-org my-org --segment 1sg000000000001 --output-file members.json --result-format json --fields Id**c,Delta_Type**c --filters "Delta_Type**c in ('new')" --order-by "Id**c asc" --limit 100
 
 # flags.target-org.summary
 

@@ -1,0 +1,37 @@
+{
+  "rulesetId": "1iraj000000VkBeAAK",
+  "label": "Marketing",
+  "dataSpaceName": "target-space",
+  "objectApiName": "TargetIndividual__dlm",
+  "secondaryDmo": "SourceEmail__dlm",
+  "filters": [
+    {
+      "field": "SourceIndividual__dlm.Status__c",
+      "operator": "EQUALS",
+      "value": "Inactive"
+    }
+  ],
+  "matchRules": [
+    {
+      "label": "Email",
+      "criteria": [
+        {
+          "field": "TargetEmail__dlm.Email__c"
+        }
+      ]
+    }
+  ],
+  "reconciliationRules": [
+    {
+      "entityName": "SourceIndividual__dlm",
+      "fields": ["SourceIndividual__dlm.FirstName__c"],
+      "linkDmoName": "SourceIndividualLink__dlm",
+      "ruleType": "SOURCE_PRIORITY",
+      "shouldIgnoreEmptyValue": true,
+      "sources": ["TargetIndividual__dlm"],
+      "unifiedDmoName": "UnifiedIndividual__dlm"
+    }
+  ],
+  "rulesetStatus": "DRAFT",
+  "lastJobStatus": "NONE"
+}

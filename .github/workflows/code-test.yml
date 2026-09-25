@@ -23,3 +23,5 @@ jobs:
             - run: npm ci --no-workspaces
             - run: npm run lint
             - run: npm test
+            - if: matrix.node == '22.19.0'
+              run: npm run test:package

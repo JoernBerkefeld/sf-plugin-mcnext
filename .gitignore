@@ -12,3 +12,4 @@ coverage
 tmp
 _mcnext-probe.mjs
 _probe-output/
+/sf-plugin-mcnext-*.tgz

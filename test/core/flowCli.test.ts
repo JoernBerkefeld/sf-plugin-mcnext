@@ -24,8 +24,8 @@ const success = {
     },
   ],
 };
-const response = (result: unknown, exitCode = 0): { stdout: string; exitCode: number } => ({
-  stdout: JSON.stringify({ status: exitCode, result }),
+const response = (result: unknown, exitCode = 0, envelopeStatus = exitCode): { stdout: string; exitCode: number } => ({
+  stdout: JSON.stringify({ status: envelopeStatus, result }),
   exitCode,
 });
 
@@ -72,7 +72,19 @@ describe('Core Flow selection boundary', () => {
     }
     expect(() => parseFlowResult(selection, { stdout: '{}', exitCode: 0 })).to.throw();
     expect(() => parseFlowResult(selection, { stdout: '{bad', exitCode: 0 })).to.throw();
+    expect(() =>
+      parseFlowResult(selection, { stdout: JSON.stringify({ status: '0', result: success }), exitCode: 0 })
+    ).to.throw();
     expect(() => parseFlowResult(selection, { ...response(success), exitCode: 1 })).to.throw();
+    expect(() => parseFlowResult(selection, response(success, 1, 0))).to.throw();
+  });
+
+  it('requires exact numeric envelope and subprocess exit status equality', () => {
+    for (const envelopeStatus of [1, 69, -1, 0.5, 999]) {
+      expect(() => parseFlowResult(selection, response(success, 0, envelopeStatus))).to.throw(
+        'envelope or exit status'
+      );
+    }
   });
 
   it('retains successful Info prerequisites and failed member diagnostics', () => {

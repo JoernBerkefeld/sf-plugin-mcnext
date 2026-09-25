@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MarketSegmentDefinition xmlns="http://soap.sforce.com/2006/04/metadata">
+    <includeCriteria>&lt;DbtPipeline xmlns=&quot;&quot;&gt;&lt;models&gt;&lt;model&gt;&lt;name&gt;SyntheticModel&lt;/name&gt;&lt;sql&gt;SELECT UnifiedSyntheticSource__dlm.SyntheticUnifiedId__c FROM UnifiedSyntheticSource__dlm WHERE 1 = 0&lt;/sql&gt;&lt;/model&gt;&lt;/models&gt;&lt;/DbtPipeline&gt;</includeCriteria>
+    <masterLabel>Synthetic DBT Segment</masterLabel>
+    <segmentType>DBT</segmentType>
+</MarketSegmentDefinition>

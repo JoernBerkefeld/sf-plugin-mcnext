@@ -72,11 +72,12 @@
     "lint": "wireit",
     "lint:fix": "cross-env ESLINT_USE_FLAT_CONFIG=false eslint src test --fix",
     "postpack": "sf-clean --ignore-signing-artifacts",
-    "prepack": "npm run build && oclif manifest",
+    "prepack": "tsc -p tsconfig.json --pretty --incremental false && npm run lint && oclif manifest",
     "prepare": "husky || true",
     "test": "wireit",
     "test:nuts": "nyc mocha \"**/*.nut.ts\" --slow 4500 --timeout 600000 --parallel",
     "test:only": "wireit",
+    "test:package": "node scripts/verify-package-lifecycle.mjs",
     "version": "oclif readme"
   },
   "publishConfig": {
@@ -93,9 +94,9 @@
       "dependencies": ["compile", "lint"]
     },
     "compile": {
-      "command": "tsc -p . --pretty --incremental",
+      "command": "tsc -p tsconfig.json --pretty --incremental",
       "files": ["src/**/*.ts", "**/tsconfig.json", "messages/**"],
-      "output": ["lib/**", "*.tsbuildinfo"],
+      "output": ["lib/**/*", "tsconfig.tsbuildinfo"],
       "clean": "if-file-deleted"
     },
     "format": {

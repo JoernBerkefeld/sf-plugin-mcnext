@@ -68,10 +68,11 @@ export function buildFlowArgs(selection: FlowSelection): string[] {
 /** Validate both the Salesforce JSON envelope and the asynchronous job state. */
 export function parseFlowResult(selection: FlowSelection, processResult: CoreProcessResult): FlowResult {
   const envelope: unknown = JSON.parse(processResult.stdout);
-  if (!isRecord(envelope) || envelope.status !== processResult.exitCode || !isRecord(envelope.result)) {
+  if (!isRecord(envelope) || typeof envelope.status !== 'number' || !isRecord(envelope.result)) {
     throw new Error('Core Flow JSON envelope or exit status is invalid');
   }
   const result = envelope.result;
+  assertEnvelopeStatus(processResult.exitCode, envelope.status);
   const diagnostics = flowDiagnostics(result);
   if (['Failed', 'Canceled', 'SucceededPartial'].includes(String(result.status)))
     throw new FlowJobError(result, diagnostics);
@@ -177,6 +178,10 @@ export async function runCore(args: string[], projectRoot: string): Promise<Core
       }
     );
   });
+}
+
+function assertEnvelopeStatus(exitCode: number, envelopeStatus: number): void {
+  if (envelopeStatus !== exitCode) throw new Error('Core Flow JSON envelope or exit status is invalid');
 }
 
 function assertUpdateResult(selection: FlowSelection, result: Record<string, unknown>): void {

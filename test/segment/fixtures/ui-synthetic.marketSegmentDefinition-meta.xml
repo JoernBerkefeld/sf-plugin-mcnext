@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MarketSegmentDefinition xmlns="http://soap.sforce.com/2006/04/metadata">
+    <includeCriteria>{"type":"LogicalComparison","operator":"and","filters":[{"filter":{"type":"TextComparison","path":null,"joinPath":null,"subject":{"objectApiName":"SyntheticSourceDmo__dlm","fieldApiName":"SyntheticSourceField__c"},"selfReference":false,"operator":"has value","subjectFieldDataType":"TEXT","subjectFieldBusinessType":"TEXT"},"containerObjectApiName":"SyntheticSourceDmo__dlm","path":[[{"objectApiName":"UnifiedSyntheticSource__dlm","fieldApiName":"SyntheticUnifiedId__c"},{"objectApiName":"UnifiedLinkSyntheticSource__dlm","fieldApiName":"SyntheticUnifiedRecordId__c"}]],"joinPath":[[{"objectApiName":"UnifiedLinkSyntheticSource__dlm","fieldApiName":"SyntheticSourceRecordId__c"},{"objectApiName":"SyntheticSourceDmo__dlm","fieldApiName":"SyntheticSourceId__c"}]],"type":"NumberAggregation","aggregateFunction":"count","comparison":{"type":"NumberComparison","path":null,"joinPath":null,"subject":{"objectApiName":"SyntheticSourceDmo__dlm","fieldApiName":"SyntheticSourceField__c"},"selfReference":false,"operator":"greater than or equal","subjectFieldDataType":"TEXT","subjectFieldBusinessType":"TEXT","value":1},"hierarchySelected":false,"hierarchicalPathList":null}]}</includeCriteria>
+    <masterLabel>Synthetic UI Segment</masterLabel>
+    <segmentOn>UnifiedSyntheticSource__dlm</segmentOn>
+    <segmentType>UI</segmentType>
+</MarketSegmentDefinition>

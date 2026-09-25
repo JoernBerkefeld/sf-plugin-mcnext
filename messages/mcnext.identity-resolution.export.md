@@ -10,7 +10,7 @@ Writes the complete bare configuration object returned by the verified v67 endpo
 
 - Export one ruleset configuration:
 
-  <%= config.bin %> <%= command.id %> --target-org my-org --ruleset-id 1iraj000000VkBeAAK --output-file identity-resolution.json
+  <%= config.bin %> <%= command.id %> --target-org my-org --ruleset-id 1ir000000000001AAA --output-file identity-resolution.json
 
 # flags.target-org.summary
 

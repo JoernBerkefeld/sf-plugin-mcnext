@@ -40,6 +40,10 @@ Expected current target name for update.
 
 Distinct fresh name for create.
 
+# flags.expect-unchanged.summary
+
+UPDATE only: require the submitted scalar values to equal the independently retrieved baseline before repeating the write.
+
 # flags.input-file.summary
 
 JSON artifact containing sourceId and fields.

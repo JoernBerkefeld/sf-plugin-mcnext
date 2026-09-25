@@ -17,7 +17,16 @@ const record = {
   Description: 'Before',
   ParentId: null,
   RecordTypeId: null,
+  BriefId: null,
+  CampaignImageId: null,
+  CampaignMemberRecordTypeId: null,
   OwnerId: '005000000000001AAA',
+  StartDate: null,
+  EndDate: null,
+  CurrencyIsoCode: null,
+  ExpectedRevenue: null,
+  BudgetedCost: null,
+  ActualCost: null,
 };
 const definitions = ['Name', 'Type', 'Status', 'IsActive', 'Description'].map((name) => ({
   name,
@@ -154,6 +163,42 @@ describe('Campaign bounded Core configuration adapter', () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+  it('requires a complete null relationship projection after CREATE', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'campaign-create-relationships-'));
+    try {
+      const create: CampaignSelection = {
+        ...selection,
+        operation: 'create',
+        projectRoot: root,
+        recordId: undefined,
+        expectedName: undefined,
+        targetName: record.Name,
+        artifact: { sourceId, fields: { Name: 'Source campaign', Description: 'Before' } },
+        journalFile: 'identity.json',
+      };
+      await Promise.all(
+        ['ParentId', 'RecordTypeId', 'BriefId', 'CampaignImageId', 'CampaignMemberRecordTypeId'].map(
+          async (relationship) => {
+            const related = { ...record, Description: 'Before', [relationship]: sourceId };
+            await rejects(
+              { ...create, journalFile: `${relationship}.json` },
+              [rows([{ Id: org }]), description, rows([]), saved, related],
+              'unsupported relationships'
+            );
+          }
+        )
+      );
+      const missing: Record<string, unknown> = { ...record, Description: 'Before' };
+      delete missing.ParentId;
+      await rejects(
+        { ...create, journalFile: 'missing.json' },
+        [rows([{ Id: org }]), description, rows([]), saved, missing],
+        'lacks required relationship projection'
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it('validates journal paths before transport and accepts a nested project path', async () => {
     const root = await mkdtemp(join(tmpdir(), 'campaign-journal-path-'));
     try {
@@ -256,6 +301,27 @@ describe('Campaign bounded Core configuration adapter', () => {
       })
     );
   });
+  it('accepts only a repeated unchanged update whose independent baseline already matches', async () => {
+    const unchanged = { ...selection, expectUnchanged: true };
+    const calls: string[][] = [];
+    await runCampaign(
+      unchanged,
+      transport(
+        [
+          rows([{ Id: org }]),
+          description,
+          { ...record, Description: 'After' },
+          saved,
+          { ...record, Description: 'After' },
+        ],
+        calls
+      )
+    );
+    expect(calls[3]).to.include("Description='After'");
+    expect(
+      await rejects(unchanged, [rows([{ Id: org }]), description, record], 'differs from the independent baseline')
+    ).to.have.length(3);
+  });
   it('detects readback and unrelated supported configuration preservation failures', async () => {
     await rejects(selection, [rows([{ Id: org }]), description, record, saved, record], 'readback mismatch');
     await Promise.all(
@@ -266,6 +332,26 @@ describe('Campaign bounded Core configuration adapter', () => {
           'preservation failed'
         )
       )
+    );
+  });
+  it('rejects absent relationship, owner and scalar preservation fields before and after mutation', async () => {
+    await Promise.all(
+      ['ParentId', 'OwnerId', 'StartDate'].map(async (field) => {
+        const incompleteBaseline = { ...record };
+        delete incompleteBaseline[field as keyof typeof incompleteBaseline];
+        expect(
+          await rejects(selection, [rows([{ Id: org }]), description, incompleteBaseline], 'baseline lacks')
+        ).to.have.length(3);
+
+        const incompleteAfter = { ...record, Description: 'After' };
+        delete incompleteAfter[field as keyof typeof incompleteAfter];
+        const calls = await rejects(
+          selection,
+          [rows([{ Id: org }]), description, record, saved, incompleteAfter],
+          'readback lacks'
+        );
+        expect(calls).to.have.length(5);
+      })
     );
   });
 });

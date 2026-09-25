@@ -20,8 +20,9 @@ describe('type registry', () => {
     expect(getType('marketSegmentMember')).to.include({ provider: 'mcnext', state: 'implemented' });
     expect(getType('marketSegmentMember')?.operations).to.deep.equal(['export']);
     expect(getType('identityResolution')?.state).to.equal('implemented');
-    expect(getType('identityResolution')?.operations).to.deep.equal(['list', 'retrieve', 'export']);
-    expect(getType('identityResolution')?.limitation).to.contain('Configuration only');
+    expect(getType('identityResolution')?.operations).to.deep.equal(['list', 'retrieve', 'export', 'plan']);
+    expect(getType('identityResolution')?.limitation).to.contain('GET-only');
+    expect(getType('identityResolution')?.limitation).to.contain('CREATE/PATCH schemas');
     expect(getType('cmsContent')).to.include({ provider: 'cms-service', state: 'conditional' });
     expect(getType('cmsContent')?.operations).to.deep.equal(['export']);
     expect(getType('cmsContent')?.limitation).to.contain('sf mcnext migration plan --cms-plan');
@@ -33,12 +34,34 @@ describe('type registry', () => {
     );
     expect(getTypes({ state: 'implemented' }).map((type) => type.name)).to.deep.equal([
       'marketSegmentMember',
+      'emailTemplate',
+      'campaign',
+      'dataGraph',
       'identityResolution',
+      'flow',
+      'marketSegmentDefinition',
     ]);
   });
 
+  it('represents every Phase 2 family with its exact public boundary', () => {
+    expect(getType('listEmail')).to.include({ provider: 'core-sf', state: 'delegated' });
+    expect(getType('listEmail')?.delegation).to.deep.include({
+      sObject: 'ListEmail',
+      command: 'sf data get record --sobject ListEmail',
+    });
+    expect(getType('emailTemplate')).to.include({ provider: 'mcnext', state: 'implemented' });
+    expect(getType('emailTemplate')?.operations).to.deep.equal(['retrieve']);
+    expect(getType('campaign')?.operations).to.deep.equal(['retrieve', 'create', 'update']);
+    expect(getType('dataGraph')?.operations).to.deep.equal(['retrieve']);
+    expect(getType('flow')?.operations).to.deep.equal(['retrieve', 'create', 'update']);
+    expect(getType('identityResolution')?.operations).to.include('plan');
+    expect(getType('marketSegmentDefinition')?.operations).to.deep.equal(['create']);
+  });
+
   it('keeps segment definition, records, and computed membership distinct', () => {
-    expect(getType('marketSegmentDefinition')?.delegation?.metadataType).to.equal('MarketSegmentDefinition');
+    expect(getType('marketSegmentDefinition')).to.include({ provider: 'mcnext', state: 'implemented' });
+    expect(getType('marketSegmentDefinition')?.operations).to.deep.equal(['create']);
+    expect(getType('marketSegmentDefinition')?.limitation).to.contain('Strict CREATE');
     expect(getType('marketSegmentRecord')?.delegation?.sObject).to.equal('MarketSegment');
     expect(getType('marketSegmentMember')?.provider).to.equal('mcnext');
   });

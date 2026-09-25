@@ -1,0 +1,58 @@
+{
+  "configuration": {
+    "label": "Marketing",
+    "dataSpaceName": "source-space",
+    "objectApiName": "SourceIndividual__dlm",
+    "secondaryDmo": "SourceEmail__dlm",
+    "filters": [
+      {
+        "field": "SourceIndividual__dlm.Status__c",
+        "operator": "EQUALS",
+        "value": "Active"
+      }
+    ],
+    "matchRules": [
+      {
+        "label": "Email",
+        "criteria": [
+          {
+            "field": "SourceEmail__dlm.Email__c"
+          }
+        ]
+      }
+    ],
+    "reconciliationRules": [
+      {
+        "entityName": "SourceIndividual__dlm",
+        "fields": ["SourceIndividual__dlm.FirstName__c"],
+        "linkDmoName": "SourceIndividualLink__dlm",
+        "ruleType": "SOURCE_PRIORITY",
+        "shouldIgnoreEmptyValue": true,
+        "sources": ["SourceIndividual__dlm"],
+        "unifiedDmoName": "UnifiedIndividual__dlm"
+      }
+    ]
+  },
+  "mappings": [
+    {
+      "field": "dataSpaceName",
+      "source": "source-space",
+      "target": "target-space"
+    },
+    {
+      "field": "objectApiName",
+      "source": "SourceIndividual__dlm",
+      "target": "TargetIndividual__dlm"
+    },
+    {
+      "field": "matchRules[0].criteria[0].field",
+      "source": "SourceEmail__dlm.Email__c",
+      "target": "TargetEmail__dlm.Email__c"
+    },
+    {
+      "field": "reconciliationRules[0].sources[0]",
+      "source": "SourceIndividual__dlm",
+      "target": "TargetIndividual__dlm"
+    }
+  ]
+}

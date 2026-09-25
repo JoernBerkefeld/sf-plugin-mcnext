@@ -28,6 +28,7 @@ export default class CampaignConfig extends SfCommand<CampaignResult> {
     'record-id': Flags.string({ summary: messages.getMessage('flags.record-id.summary') }),
     'expected-name': Flags.string({ summary: messages.getMessage('flags.expected-name.summary') }),
     'target-name': Flags.string({ summary: messages.getMessage('flags.target-name.summary') }),
+    'expect-unchanged': Flags.boolean({ summary: messages.getMessage('flags.expect-unchanged.summary') }),
     'input-file': Flags.string({ summary: messages.getMessage('flags.input-file.summary') }),
     'output-file': Flags.string({ summary: messages.getMessage('flags.output-file.summary') }),
     'journal-file': Flags.string({ summary: messages.getMessage('flags.journal-file.summary') }),
@@ -46,6 +47,7 @@ export default class CampaignConfig extends SfCommand<CampaignResult> {
       recordId: f['record-id'],
       expectedName: f['expected-name'],
       targetName: f['target-name'],
+      expectUnchanged: f['expect-unchanged'],
       journalFile: f['journal-file'],
       artifact: f['input-file']
         ? (JSON.parse(await readFile(resolve(f['project-dir'], f['input-file']), 'utf8')) as CampaignArtifact)

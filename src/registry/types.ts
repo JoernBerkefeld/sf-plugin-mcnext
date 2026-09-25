@@ -7,7 +7,7 @@ export type Provider = 'mcnext' | 'core-sf' | 'cms-service' | 'external/manual' 
 export type SupportState = 'implemented' | 'delegated' | 'conditional' | 'deferred';
 
 /** Operations a type can expose through this plugin or a delegated provider. */
-export type McnOperation = 'list' | 'retrieve' | 'deploy' | 'export';
+export type McnOperation = 'list' | 'retrieve' | 'deploy' | 'export' | 'create' | 'update' | 'plan';
 
 /** How a core-sf type is retrieved or deployed by the orchestrator. */
 export type Delegation = {
@@ -17,6 +17,8 @@ export type Delegation = {
   sObject?: string;
   /** Fields to select for record exports. */
   fields?: string[];
+  /** Exact core command family exposed by a public delegation command. */
+  command?: string;
 };
 
 /** A single retrievable/deployable artifact within an org. */

@@ -123,6 +123,98 @@ describe('McnClient', () => {
     expect(urls[1]).to.equal('/services/data/v67.0/ssot/segments?offset=6&batchSize=2');
   });
 
+  it('fails strict completeness for malformed and inconsistent pagination metadata', async () => {
+    const scenarios = [
+      { segments: [], batchSize: 1, offset: 0 },
+      { segments: [{ id: 's1' }], batchSize: 1, totalSize: 2 },
+      { segments: [{ id: 's1' }], batchSize: 0, offset: 0, totalSize: 2 },
+      { segments: [{ id: 's1' }], batchSize: 2, offset: 0, totalSize: 3 },
+      { segments: [{ id: 's1' }], batchSize: 1, offset: 1, totalSize: 2 },
+    ];
+    for (const page of scenarios) {
+      // eslint-disable-next-line no-await-in-loop -- each malformed envelope needs an isolated client
+      const { client } = await clientReturning([page]);
+      // eslint-disable-next-line no-await-in-loop -- each malformed envelope is independently rejected
+      const error = await captureError(
+        client.requestAll(
+          {
+            path: '/ssot/segments',
+            itemsKey: 'segments',
+            pageSizeParam: 'batchSize',
+            requireItemsKey: true,
+            requireCompletePagination: true,
+          },
+          1
+        )
+      );
+      expect(error.name).to.equal('PaginationEnvelopeError');
+    }
+  });
+
+  it('fails strict completeness when a later page omits totals', async () => {
+    const missingTotal = await clientReturning([
+      { segments: [{ id: 's1' }], batchSize: 1, offset: 0, totalSize: 2 },
+      { segments: [{ id: 's2' }], batchSize: 1, offset: 1 },
+    ]);
+    const error = await captureError(
+      missingTotal.client.requestAll(
+        {
+          path: '/ssot/segments',
+          itemsKey: 'segments',
+          pageSizeParam: 'batchSize',
+          requireItemsKey: true,
+          requireCompletePagination: true,
+        },
+        1
+      )
+    );
+    expect(error.name).to.equal('PaginationEnvelopeError');
+    expect(error.message).to.contain('total count');
+  });
+
+  it('fails strict completeness for a malformed later page and a non-forward pointer', async () => {
+    const malformedLater = await clientReturning([
+      { segments: [{ id: 's1' }], batchSize: 1, offset: 0, totalSize: 2 },
+      { segments: [{ id: 's2' }], batchSize: 1, offset: 0, totalSize: 2 },
+    ]);
+    const laterError = await captureError(
+      malformedLater.client.requestAll(
+        {
+          path: '/ssot/segments',
+          itemsKey: 'segments',
+          pageSizeParam: 'batchSize',
+          requireItemsKey: true,
+          requireCompletePagination: true,
+        },
+        1
+      )
+    );
+    expect(laterError.message).to.contain('inconsistent');
+
+    const nonForward = await clientReturning([
+      {
+        segments: [{ id: 's1' }],
+        batchSize: 1,
+        offset: 0,
+        totalSize: 2,
+        nextPageUrl: '/services/data/v67.0/ssot/segments?batchSize=1&offset=0',
+      },
+    ]);
+    const pointerError = await captureError(
+      nonForward.client.requestAll(
+        {
+          path: '/ssot/segments',
+          itemsKey: 'segments',
+          pageSizeParam: 'batchSize',
+          requireItemsKey: true,
+          requireCompletePagination: true,
+        },
+        1
+      )
+    );
+    expect(pointerError.message).to.contain('expected offset');
+  });
+
   it('follows the observed segment-member nextPageUrl with offSet metadata', async () => {
     const { client, urls } = await clientReturning([
       {
