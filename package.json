@@ -1,7 +1,7 @@
 {
   "name": "sf-plugin-mcnext",
   "description": "Salesforce CLI plugin for Marketing Cloud Next read/write workflows and core CLI delegation",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "author": {
     "name": "Joern Berkefeld",
     "email": "joern.berkefeld@gmail.com"
@@ -35,7 +35,12 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "files": ["/lib", "/messages", "/oclif.manifest.json", "/oclif.lock"],
+  "files": [
+    "/lib",
+    "/messages",
+    "/oclif.manifest.json",
+    "/oclif.lock"
+  ],
   "keywords": [
     "salesforce",
     "salesforcedx",
@@ -50,7 +55,9 @@
     "commands": "./lib/commands",
     "bin": "sf",
     "topicSeparator": " ",
-    "devPlugins": ["@oclif/plugin-help"],
+    "devPlugins": [
+      "@oclif/plugin-help"
+    ],
     "topics": {
       "mcnext": {
         "description": "Export and inspect Marketing Cloud Next data and configuration, with core CLI delegation."
@@ -91,38 +98,74 @@
   },
   "wireit": {
     "build": {
-      "dependencies": ["compile", "lint"]
+      "dependencies": [
+        "compile",
+        "lint"
+      ]
     },
     "compile": {
       "command": "tsc -p tsconfig.json --pretty --incremental",
-      "files": ["src/**/*.ts", "**/tsconfig.json", "messages/**"],
-      "output": ["lib/**/*", "tsconfig.tsbuildinfo"],
+      "files": [
+        "src/**/*.ts",
+        "**/tsconfig.json",
+        "messages/**"
+      ],
+      "output": [
+        "lib/**/*",
+        "tsconfig.tsbuildinfo"
+      ],
       "clean": "if-file-deleted"
     },
     "format": {
       "command": "prettier --write \"+(src|test|schemas)/**/*.+(ts|js|json)|command-snapshot.json\"",
-      "files": ["src/**/*.ts", "test/**/*.ts", "schemas/**/*.json", "command-snapshot.json", ".prettier*"],
+      "files": [
+        "src/**/*.ts",
+        "test/**/*.ts",
+        "schemas/**/*.json",
+        "command-snapshot.json",
+        ".prettier*"
+      ],
       "output": []
     },
     "lint": {
       "command": "cross-env ESLINT_USE_FLAT_CONFIG=false eslint src test --color --cache --cache-location .eslintcache",
-      "files": ["src/**/*.ts", "test/**/*.ts", "messages/**", "**/.eslint*", "**/tsconfig.json"],
+      "files": [
+        "src/**/*.ts",
+        "test/**/*.ts",
+        "messages/**",
+        "**/.eslint*",
+        "**/tsconfig.json"
+      ],
       "output": []
     },
     "test:compile": {
       "command": "tsc -p \"./test\" --pretty",
-      "files": ["test/**/*.ts", "**/tsconfig.json"],
+      "files": [
+        "test/**/*.ts",
+        "**/tsconfig.json"
+      ],
       "output": []
     },
     "test": {
-      "dependencies": ["test:compile", "test:only", "lint"]
+      "dependencies": [
+        "test:compile",
+        "test:only",
+        "lint"
+      ]
     },
     "test:only": {
       "command": "nyc mocha \"test/**/*.test.ts\"",
       "env": {
         "FORCE_COLOR": "2"
       },
-      "files": ["test/**/*.ts", "src/**/*.ts", "**/tsconfig.json", ".mocha*", "!*.nut.ts", ".nycrc"],
+      "files": [
+        "test/**/*.ts",
+        "src/**/*.ts",
+        "**/tsconfig.json",
+        ".mocha*",
+        "!*.nut.ts",
+        ".nycrc"
+      ],
       "output": []
     }
   },
