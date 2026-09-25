@@ -16,7 +16,7 @@
   },
   "homepage": "https://github.com/JoernBerkefeld/sf-plugin-mcnext#readme",
   "dependencies": {
-    "@oclif/core": "^4",
+    "@oclif/core": "^5",
     "@salesforce/core": "^9",
     "@salesforce/sf-plugins-core": "^12",
     "xml2js": "^0.6.2"
