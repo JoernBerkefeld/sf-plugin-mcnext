@@ -3,10 +3,12 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { delimiter, dirname, isAbsolute, join, resolve as resolvePath } from 'node:path';
 import {
   validateCmsExport,
+  validateCmsImport,
   validateCmsInfo,
   validateCmsStatusExit,
   type CmsEnvelope,
   type CmsExportResult,
+  type CmsImportResult,
   type CmsInfoResult,
 } from './contracts.js';
 
@@ -15,7 +17,7 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_OUTPUT_LIMIT = 1_048_576;
 const REMOVED_ENVIRONMENT_VARIABLES = ['NODE_OPTIONS', 'NODE_PATH', 'OCLIF_DEV', 'OCLIF_TS_NODE'] as const;
 
-type CmsCliOperation = 'info' | 'export';
+type CmsCliOperation = 'info' | 'export' | 'import-dry-run' | 'import-apply';
 type ProcessSpawner = typeof spawn;
 
 type CmsCliInvocation = {
@@ -58,6 +60,37 @@ export function buildCmsExportArgs(sourceOrg: string, outputDirectory: string): 
   ];
 }
 
+/** Build the exact allowlisted CMS workspace import arguments. */
+export function buildCmsImportArgs(input: {
+  targetOrg: string;
+  targetWorkspaceId: string;
+  sourceDirectory: string;
+  reportDirectory?: string;
+}): string[] {
+  requireInput(input.targetOrg, 'target org');
+  requireInput(input.targetWorkspaceId, 'target workspace ID');
+  requireInput(input.sourceDirectory, 'source directory');
+  const args = [
+    'cms',
+    'import',
+    'workspace',
+    '--target-org',
+    input.targetOrg,
+    '--workspace-id',
+    input.targetWorkspaceId,
+    '--source-dir',
+    input.sourceDirectory,
+    '--contract-version',
+    '1',
+    '--json',
+  ];
+  if (input.reportDirectory !== undefined) {
+    requireInput(input.reportDirectory, 'report directory');
+    args.splice(args.length - 2, 0, '--apply', '--report-dir', input.reportDirectory);
+  }
+  return args;
+}
+
 /** Run the allowlisted read-only CMS discovery command. */
 export async function runCmsInfo(options: CmsCliOptions = {}): Promise<ReturnType<typeof validateCmsInfo>> {
   const processResult = await runAllowlistedCmsCommand('info', CMS_INFO_ARGS, options);
@@ -70,6 +103,21 @@ export async function runCmsInfo(options: CmsCliOptions = {}): Promise<ReturnTyp
 }
 
 /** Run the allowlisted read-only aggregate CMS export command. */
+export async function runCmsImport(
+  input: { targetOrg: string; targetWorkspaceId: string; sourceDirectory: string; reportDirectory?: string },
+  options: CmsCliOptions = {}
+): Promise<CmsEnvelope<CmsImportResult>> {
+  const operation = input.reportDirectory === undefined ? 'import-dry-run' : 'import-apply';
+  const processResult = await runAllowlistedCmsCommand(operation, buildCmsImportArgs(input), options);
+  try {
+    const envelope = validateCmsImport(processResult.value);
+    validateCmsStatusExit(envelope.status, processResult.exitCode);
+    return envelope;
+  } catch (error) {
+    throw cliError('validation failed', error);
+  }
+}
+
 export async function runCmsExport(
   sourceOrg: string,
   outputDirectory: string,
@@ -93,7 +141,7 @@ async function runAllowlistedCmsCommand(
   operation: CmsCliOperation,
   args: readonly string[],
   options: CmsCliOptions
-): Promise<{ value: CmsEnvelope<CmsInfoResult | CmsExportResult>; exitCode: number }> {
+): Promise<{ value: CmsEnvelope<CmsInfoResult | CmsExportResult | CmsImportResult>; exitCode: number }> {
   assertCmsCliInvocation(operation, args);
   const invocation = resolveCmsCliInvocation(options);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -192,14 +240,30 @@ export function resolveCmsCliInvocation(options: CmsCliOptions = {}): CmsCliInvo
 }
 
 export function assertCmsCliInvocation(operation: CmsCliOperation, args: readonly string[]): void {
-  const expected = operation === 'info' ? CMS_INFO_ARGS : buildCmsExportArgs(args[4] ?? '', args[9] ?? '');
+  let expected: readonly string[];
+  if (operation === 'info') expected = CMS_INFO_ARGS;
+  else if (operation === 'export') expected = buildCmsExportArgs(args[4] ?? '', args[9] ?? '');
+  else {
+    const apply = operation === 'import-apply';
+    expected = buildCmsImportArgs({
+      targetOrg: args[4] ?? '',
+      targetWorkspaceId: args[6] ?? '',
+      sourceDirectory: args[8] ?? '',
+      ...(apply ? { reportDirectory: args[11] ?? '' } : {}),
+    });
+  }
   if (args.length !== expected.length || args.some((arg, index) => arg !== expected[index])) {
     throw new CmsCliError('CMS CLI operation or arguments are not allowlisted');
   }
-  if (args.includes('import') || args.includes('--apply')) throw new CmsCliError('CMS CLI mutation is prohibited');
+  if (args.includes('--native-copy-map') || args.includes('--editable-dir') || args.includes('--allow-partial')) {
+    throw new CmsCliError('CMS CLI prohibited import profile');
+  }
 }
 
-function parseExactlyOneJson(stdout: string, stderr: string): CmsEnvelope<CmsInfoResult | CmsExportResult> {
+function parseExactlyOneJson(
+  stdout: string,
+  stderr: string
+): CmsEnvelope<CmsInfoResult | CmsExportResult | CmsImportResult> {
   const framed = stdout.trim();
   if (framed.length === 0) throw new CmsCliError(`CMS CLI returned no JSON; stderr=${redact(stderr)}`);
   try {

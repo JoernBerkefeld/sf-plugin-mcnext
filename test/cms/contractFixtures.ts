@@ -65,6 +65,12 @@ export const validInfoFixture: CmsEnvelope<CmsInfoResult> = {
         transport: 'cli-json',
         contract: 'sf-cms-external-reference-correlations@1',
       },
+      {
+        id: 'workspace.import.mapping',
+        state: 'experimental',
+        transport: 'cli-json',
+        contract: 'sf-cms-workspace-import@1',
+      },
     ],
   },
 };

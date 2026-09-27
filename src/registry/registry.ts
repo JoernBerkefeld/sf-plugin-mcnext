@@ -66,9 +66,9 @@ export const MCN_TYPES: McnType[] = [
     description: 'Provider-owned CMS workspaces and content evidence for migration planning',
     provider: 'cms-service',
     state: 'conditional',
-    operations: ['export'],
+    operations: ['export', 'create'],
     limitation:
-      'Capability discovery and aggregate export evidence can be consumed by sf mcnext migration plan --cms-plan through the separately installed sf-plugin-cms >=0.4.0 versioned CLI contract; MCN owns no CMS content retrieval, import, deployment, payload rewriting, or execution.',
+      'Aggregate export planning and bounded create-only orchestration use the separately installed sf-plugin-cms public CLI v1 contracts. Create requires explicit experimental opt-in, dry-runs every route before apply, and remains limited to provider-accepted complete packages; MCN performs no payload inspection or CMS reference rewriting.',
   },
   {
     name: 'flow',

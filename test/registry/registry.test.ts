@@ -24,14 +24,11 @@ describe('type registry', () => {
     expect(getType('identityResolution')?.limitation).to.contain('GET-only');
     expect(getType('identityResolution')?.limitation).to.contain('CREATE/PATCH schemas');
     expect(getType('cmsContent')).to.include({ provider: 'cms-service', state: 'conditional' });
-    expect(getType('cmsContent')?.operations).to.deep.equal(['export']);
-    expect(getType('cmsContent')?.limitation).to.contain('sf mcnext migration plan --cms-plan');
-    expect(getType('cmsContent')?.limitation).to.contain(
-      'separately installed sf-plugin-cms >=0.4.0 versioned CLI contract'
-    );
-    expect(getType('cmsContent')?.limitation).to.contain(
-      'MCN owns no CMS content retrieval, import, deployment, payload rewriting, or execution'
-    );
+    expect(getType('cmsContent')?.operations).to.deep.equal(['export', 'create']);
+    expect(getType('cmsContent')?.limitation).to.contain('separately installed sf-plugin-cms public CLI v1 contracts');
+    expect(getType('cmsContent')?.limitation).to.contain('explicit experimental opt-in');
+    expect(getType('cmsContent')?.limitation).to.contain('dry-runs every route before apply');
+    expect(getType('cmsContent')?.limitation).to.contain('MCN performs no payload inspection or CMS reference rewriting');
     expect(getTypes({ state: 'implemented' }).map((type) => type.name)).to.deep.equal([
       'marketSegmentMember',
       'emailTemplate',

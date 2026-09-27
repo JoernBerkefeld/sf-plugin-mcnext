@@ -26,6 +26,7 @@ describe('CMS public contract boundary', () => {
     expect(validated.capabilities).to.deep.equal({
       bulkExport: 'implemented',
       externalReferenceCorrelation: 'experimental',
+      workspaceImport: 'experimental',
       experimental: true,
     });
   });

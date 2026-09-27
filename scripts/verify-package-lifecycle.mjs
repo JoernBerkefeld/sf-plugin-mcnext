@@ -1,18 +1,22 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { basename, join, resolve } from 'node:path';
 
 const packageRoot = resolve(import.meta.dirname, '..');
-const workDir = mkdtempSync(join(tmpdir(), 'sf-plugin-mcnext-package-'));
 const npmCli = process.env.npm_execpath;
 assert.ok(npmCli, 'npm_execpath is required to run the package lifecycle');
 
-execFileSync(process.execPath, [npmCli, 'run', 'build'], { cwd: packageRoot, stdio: 'inherit' });
-rmSync(join(packageRoot, 'lib'), { force: true, recursive: true });
-rmSync(join(packageRoot, 'oclif.manifest.json'), { force: true });
+execFileSync(process.execPath, [join(packageRoot, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.json', '--pretty', '--incremental', 'false'], {
+  cwd: packageRoot,
+  stdio: 'inherit',
+});
+const { createRunOwnedDirectory, createRunOwnedTemp, removeRunOwnedPath, removeRunOwnedRoot } = await import(
+  '../lib/filesystem/runOwnedTemp.js'
+);
+const cleanupRun = await createRunOwnedTemp('sf-plugin-mcnext-package');
+const workDir = await createRunOwnedDirectory(cleanupRun, 'pack');
 
 const packedFiles = execFileSync(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', workDir], {
   cwd: packageRoot,
@@ -49,6 +53,7 @@ try {
     'mcnext:identity-resolution:plan',
     'mcnext:identity-resolution:show',
     'mcnext:list:types',
+    'mcnext:migration:cms',
     'mcnext:migration:plan',
     'mcnext:segment:definition:create',
     'mcnext:segment:members:export',
@@ -75,7 +80,7 @@ try {
         provider: 'mcnext',
         state: 'implemented',
       },
-      cmsContent: { operations: ['export'], provider: 'cms-service', state: 'conditional' },
+      cmsContent: { operations: ['export', 'create'], provider: 'cms-service', state: 'conditional' },
       flow: { operations: ['retrieve', 'create', 'update'], provider: 'mcnext', state: 'implemented' },
       flowDefinition: { operations: ['retrieve', 'deploy'], provider: 'core-sf', state: 'delegated' },
       flowTest: { operations: ['retrieve', 'deploy'], provider: 'core-sf', state: 'delegated' },
@@ -100,5 +105,6 @@ try {
   assert.equal(packageJson.exports, './lib/index.js', 'package export must point to the compiled entry point');
   process.stdout.write(`Verified ${basename(tarball)} (${entries.length} files, ${commandIds.length} commands).\n`);
 } finally {
-  rmSync(workDir, { force: true, recursive: true });
+  await removeRunOwnedPath(cleanupRun, workDir);
+  await removeRunOwnedRoot(cleanupRun);
 }

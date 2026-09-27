@@ -152,7 +152,12 @@ describe('mcnext migration plan', () => {
     const packageHash = exported.result!.workspaces[0].artifact.manifestSha256;
     $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
       envelope: info,
-      capabilities: { bulkExport: 'implemented', externalReferenceCorrelation: 'experimental', experimental: true },
+      capabilities: {
+        bulkExport: 'implemented',
+        externalReferenceCorrelation: 'experimental',
+        workspaceImport: 'experimental',
+        experimental: true,
+      },
     });
     const exportStub = $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
     $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage').resolves({
@@ -221,7 +226,12 @@ describe('mcnext migration plan', () => {
     exported.provenance.sourceOrgId = '00Dsource';
     $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
       envelope: cloneFixture(validInfoFixture),
-      capabilities: { bulkExport: 'implemented', externalReferenceCorrelation: 'experimental', experimental: true },
+      capabilities: {
+        bulkExport: 'implemented',
+        externalReferenceCorrelation: 'experimental',
+        workspaceImport: 'experimental',
+        experimental: true,
+      },
     });
     $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
     $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage').resolves({
@@ -267,7 +277,12 @@ describe('mcnext migration plan', () => {
         else exported.status = status;
         $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
           envelope: cloneFixture(validInfoFixture),
-          capabilities: { bulkExport: 'implemented', externalReferenceCorrelation: 'experimental', experimental: true },
+          capabilities: {
+        bulkExport: 'implemented',
+        externalReferenceCorrelation: 'experimental',
+        workspaceImport: 'experimental',
+        experimental: true,
+      },
         });
         $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
         const validate = $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage').resolves({
@@ -323,7 +338,12 @@ describe('mcnext migration plan', () => {
       exported.result!.workspaces[0].diagnostics.warnings.push(unsafe);
       $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
         envelope: cloneFixture(validInfoFixture),
-        capabilities: { bulkExport: 'implemented', externalReferenceCorrelation: 'experimental', experimental: true },
+        capabilities: {
+        bulkExport: 'implemented',
+        externalReferenceCorrelation: 'experimental',
+        workspaceImport: 'experimental',
+        experimental: true,
+      },
       });
       $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
       const validate = $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage');
@@ -384,7 +404,12 @@ describe('mcnext migration plan', () => {
     });
     $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
       envelope: cloneFixture(validInfoFixture),
-      capabilities: { bulkExport: 'implemented', externalReferenceCorrelation: 'experimental', experimental: true },
+      capabilities: {
+        bulkExport: 'implemented',
+        externalReferenceCorrelation: 'experimental',
+        workspaceImport: 'experimental',
+        experimental: true,
+      },
     });
     $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
     $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage').callsFake(async (_root, _envelope, workspace) => {
@@ -445,7 +470,12 @@ describe('mcnext migration plan', () => {
     exported.provenance.sourceOrgId = '00Dsource';
     $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
       envelope: cloneFixture(validInfoFixture),
-      capabilities: { bulkExport: 'implemented', externalReferenceCorrelation: 'experimental', experimental: true },
+      capabilities: {
+        bulkExport: 'implemented',
+        externalReferenceCorrelation: 'experimental',
+        workspaceImport: 'experimental',
+        experimental: true,
+      },
     });
     $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
     $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage').rejects(

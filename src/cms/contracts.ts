@@ -5,13 +5,16 @@ export const CMS_EXPORT_CONTRACT = 'sf-cms-workspace-export-set' as const;
 export const CMS_CORRELATION_CONTRACT = 'sf-cms-external-reference-correlations@1' as const;
 export const CMS_BULK_EXPORT_CAPABILITY = 'workspace.export.bulk' as const;
 export const CMS_CORRELATION_CAPABILITY = 'workspace.export.external-reference-correlation' as const;
+export const CMS_IMPORT_CAPABILITY = 'workspace.import.mapping' as const;
+export const CMS_IMPORT_CONTRACT = 'sf-cms-workspace-import' as const;
 export const CMS_REFERENCE_KIND = 'cms.content' as const;
 export const CMS_INFO_COMMAND = 'sf cms info' as const;
 export const CMS_EXPORT_COMMAND = 'sf cms export workspace' as const;
+export const CMS_IMPORT_COMMAND = 'sf cms import workspace' as const;
 
 export type CmsStatus = 'success' | 'partial' | 'failed' | 'blocked';
 export type CmsCapabilityState = 'implemented' | 'experimental' | 'unavailable';
-export type CmsOperation = 'cms.info' | 'workspace.export.bulk';
+export type CmsOperation = 'cms.info' | 'workspace.export.bulk' | 'workspace.import';
 
 export type CmsDiagnostic = {
   code: string;
@@ -104,7 +107,32 @@ export type CmsEnvelope<TResult> = {
 export type CmsCapabilitySelection = {
   bulkExport: 'implemented' | 'experimental';
   externalReferenceCorrelation: 'implemented' | 'experimental';
+  workspaceImport: 'implemented' | 'experimental';
   experimental: boolean;
+};
+
+export type CmsImportMapping = {
+  referenceId: string;
+  kind: string;
+  source: { sourceId: string; portableKey: { scheme: 'cms-opaque-v1'; value: string } };
+  target: { targetId: string; targetReference: string };
+  operation: 'created' | 'matched' | 'updated' | 'unchanged';
+  status: 'resolved' | 'unresolved' | 'ambiguous' | 'failed';
+  cmsReferencesRewritten: boolean;
+};
+
+export type CmsImportReference = {
+  referenceId: string;
+  kind: string;
+  status: 'resolved' | 'unresolved' | 'ambiguous' | 'failed' | 'unsupported';
+};
+
+export type CmsImportResult = {
+  sourcePackage: { manifestSha256: string; workspaceId: string };
+  target: { orgId: string; workspaceId: string };
+  integrity: { listedItemCount: number; verifiedItemCount: number; unlistedFileCount: number; verified: boolean };
+  mappings: CmsImportMapping[];
+  references: CmsImportReference[];
 };
 
 export class CmsContractError extends Error {}
@@ -143,12 +171,25 @@ export function validateCmsInfo(value: unknown): {
     CMS_CORRELATION_CAPABILITY,
     CMS_CORRELATION_CONTRACT
   );
+  const workspaceImport = requiredCapability(
+    envelope.result.capabilities,
+    CMS_IMPORT_CAPABILITY,
+    `${CMS_IMPORT_CONTRACT}@1`
+  );
+  requireMajor(envelope.result.contracts.commandResults.workspaceImport, 1, 'import result');
+  if (!envelope.result.contracts.compatibility['workspaceImport@1'].workspaceExportManifestMajors.includes(1)) {
+    throw contractError('import result and manifest compatibility');
+  }
   return {
     envelope,
     capabilities: {
       bulkExport,
       externalReferenceCorrelation,
-      experimental: bulkExport === 'experimental' || externalReferenceCorrelation === 'experimental',
+      workspaceImport,
+      experimental:
+        bulkExport === 'experimental' ||
+        externalReferenceCorrelation === 'experimental' ||
+        workspaceImport === 'experimental',
     },
   };
 }
@@ -179,6 +220,18 @@ export function validateCmsExport(value: unknown): CmsEnvelope<CmsExportResult> 
     if (existing !== undefined && existing !== binding) throw contractError('incompatible referenceId reuse');
     referenceBindings.set(row.referenceId, binding);
   }
+  return envelope;
+}
+
+/** Validate the frozen create-only workspace import boundary. */
+export function validateCmsImport(value: unknown): CmsEnvelope<CmsImportResult> {
+  const envelope = validateEnvelope(value, 'workspace.import', CMS_IMPORT_CONTRACT, validateImportResult);
+  if (envelope.provenance.command !== CMS_IMPORT_COMMAND) throw contractError('import command provenance');
+  if (envelope.result === null) return envelope;
+  if (envelope.result.target.orgId.length !== 18) throw contractError('target org ID must be 18 characters');
+  if (!envelope.result.integrity.verified) throw contractError('import package integrity must be verified');
+  if (envelope.result.integrity.listedItemCount !== envelope.result.integrity.verifiedItemCount)
+    throw contractError('import integrity counts');
   return envelope;
 }
 
@@ -417,6 +470,82 @@ function validateWorkspace(value: unknown): CmsExportWorkspace {
       manifestSha256: sha256(artifact.manifestSha256, 'manifestSha256'),
     },
     diagnostics: validateDiagnostics(record.diagnostics),
+  };
+}
+
+function validateImportResult(value: unknown): CmsImportResult {
+  const record = strictRecord(value, ['sourcePackage', 'target', 'integrity', 'mappings', 'references'], 'import result');
+  const sourcePackage = strictRecord(record.sourcePackage, ['manifestSha256', 'workspaceId'], 'source package');
+  const target = strictRecord(record.target, ['orgId', 'workspaceId'], 'import target');
+  const integrity = strictRecord(
+    record.integrity,
+    ['listedItemCount', 'verifiedItemCount', 'unlistedFileCount', 'verified'],
+    'import integrity'
+  );
+  return {
+    sourcePackage: {
+      manifestSha256: sha256(sourcePackage.manifestSha256, 'source manifestSha256'),
+      workspaceId: nonempty(sourcePackage.workspaceId, 'source workspace ID'),
+    },
+    target: {
+      orgId: nonempty(target.orgId, 'target org ID'),
+      workspaceId: nonempty(target.workspaceId, 'target workspace ID'),
+    },
+    integrity: {
+      listedItemCount: integer(integrity.listedItemCount, 'listed item count'),
+      verifiedItemCount: integer(integrity.verifiedItemCount, 'verified item count'),
+      unlistedFileCount: integer(integrity.unlistedFileCount, 'unlisted file count'),
+      verified: boolean(integrity.verified, 'integrity verified'),
+    },
+    mappings: array(record.mappings, 'import mappings').map(validateImportMapping),
+    references: array(record.references, 'import references').map(validateImportReference),
+  };
+}
+
+function validateImportMapping(value: unknown): CmsImportMapping {
+  const record = strictRecord(
+    value,
+    ['referenceId', 'kind', 'source', 'target', 'operation', 'status', 'cmsReferencesRewritten'],
+    'import mapping'
+  );
+  const source = strictRecord(record.source, ['sourceId', 'portableKey'], 'mapping source');
+  const portableKey = strictRecord(source.portableKey, ['scheme', 'value'], 'mapping portable key');
+  const target = strictRecord(record.target, ['targetId', 'targetReference'], 'mapping target');
+  exact(portableKey.scheme, 'cms-opaque-v1', 'portable key scheme');
+  const status = oneOf(record.status, ['resolved', 'unresolved', 'ambiguous', 'failed'] as const, 'mapping status');
+  const rewritten = boolean(record.cmsReferencesRewritten, 'CMS references rewritten');
+  if (status === 'resolved' && !rewritten) throw contractError('resolved mapping requires provider reference rewriting');
+  return {
+    referenceId: nonempty(record.referenceId, 'mapping referenceId'),
+    kind: nonempty(record.kind, 'mapping kind'),
+    source: {
+      sourceId: nonempty(source.sourceId, 'mapping sourceId'),
+      portableKey: { scheme: 'cms-opaque-v1', value: nonempty(portableKey.value, 'portable key value') },
+    },
+    target: {
+      targetId: nonempty(target.targetId, 'mapping targetId'),
+      targetReference: nonempty(target.targetReference, 'mapping targetReference'),
+    },
+    operation: oneOf(
+      record.operation,
+      ['created', 'matched', 'updated', 'unchanged'] as const,
+      'mapping operation'
+    ),
+    status,
+    cmsReferencesRewritten: rewritten,
+  };
+}
+
+function validateImportReference(value: unknown): CmsImportReference {
+  const record = strictRecord(value, ['referenceId', 'kind', 'status'], 'import reference');
+  return {
+    referenceId: nonempty(record.referenceId, 'referenceId'),
+    kind: nonempty(record.kind, 'reference kind'),
+    status: oneOf(
+      record.status,
+      ['resolved', 'unresolved', 'ambiguous', 'failed', 'unsupported'] as const,
+      'reference status'
+    ),
   };
 }
 

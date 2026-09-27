@@ -42,12 +42,11 @@ describe('mcnext list types', () => {
     const result = await ListTypes.run(['--provider', 'cms-service']);
     expect(result.map((row) => row.name)).to.deep.equal(['cmsContent']);
     expect(result[0]).to.include({ provider: 'cms-service', state: 'conditional', delegatedTo: '' });
-    expect(result[0]?.operations).to.deep.equal(['export']);
-    expect(result[0]?.limitation).to.contain('sf mcnext migration plan --cms-plan');
-    expect(result[0]?.limitation).to.contain('separately installed sf-plugin-cms >=0.4.0 versioned CLI contract');
-    expect(result[0]?.limitation).to.contain(
-      'MCN owns no CMS content retrieval, import, deployment, payload rewriting, or execution'
-    );
+    expect(result[0]?.operations).to.deep.equal(['export', 'create']);
+    expect(result[0]?.limitation).to.contain('separately installed sf-plugin-cms public CLI v1 contracts');
+    expect(result[0]?.limitation).to.contain('explicit experimental opt-in');
+    expect(result[0]?.limitation).to.contain('dry-runs every route before apply');
+    expect(result[0]?.limitation).to.contain('MCN performs no payload inspection or CMS reference rewriting');
   });
 
   it('names the exact core command for delegated metadata', async () => {
