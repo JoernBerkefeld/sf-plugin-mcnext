@@ -24,7 +24,7 @@ function clientWith(options: FakeClientOptions): McnClient {
     request: async (request: RequestOptions) => {
       const apiName = decodeURIComponent(request.path.split('/').at(-1) ?? '');
       const segment = options.segments.find((candidate) => candidate.apiName === apiName);
-      if (segment) return segment;
+      if (segment) return { segments: [segment] };
       throw Object.assign(new Error(`Segment not found: ${apiName}`), { name: 'ITEM_NOT_FOUND' });
     },
     requestAll: async (request: RequestOptions) => {
@@ -59,7 +59,7 @@ describe('mcnext segment members export', () => {
       })()
     );
     const client = {
-      request: async () => ({ apiName: 'Annual_Promo' }),
+      request: async () => ({ segments: [{ apiName: 'Annual_Promo' }] }),
       requestPages,
     } as unknown as McnClient;
     $$.SANDBOX.stub(McnClient, 'create').resolves(client);
@@ -145,14 +145,16 @@ describe('mcnext segment members export', () => {
     const pageRequests: PageOptions[] = [];
     const outputFile = join(directory, 'nested', 'members.json');
     const client = clientWith({
-      segments: [{ apiName: 'Annual_Promo', displayName: 'Annual Promo' }],
+      segments: [
+        { apiName: 'Annual_Promo', displayName: 'Annual Promo', marketSegmentId: '1sg000000000001AAA' },
+      ],
       pages: [[{ id: 'opaque-1', deltaType: 'new' }], [{ id: 'opaque-2', snapshotType: 'F' }]],
       pageRequests,
     });
 
     const result = await exportSegmentMembers({
       client,
-      segment: 'Annual Promo',
+      segment: '1sg000000000001AAA',
       outputFile,
       resultFormat: 'json',
       fields: 'Id__c,Delta_Type__c',
@@ -218,7 +220,7 @@ describe('mcnext segment members export', () => {
   it('reports a partially written file as incomplete when paging fails', async () => {
     const outputFile = join(directory, 'members.json');
     const client = {
-      request: async () => ({ apiName: 'Annual_Promo' }),
+      request: async () => ({ segments: [{ apiName: 'Annual_Promo' }] }),
       async *requestPages() {
         yield [{ id: 'opaque-1' }];
         throw new Error('page failed');

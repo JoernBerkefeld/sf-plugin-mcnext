@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { basename, join, resolve } from 'node:path';
+import { parseNpmPackOutput } from './parse-npm-pack-output.mjs';
 
 const packageRoot = resolve(import.meta.dirname, '..');
 const npmCli = process.env.npm_execpath;
@@ -24,10 +25,15 @@ const packedFiles = execFileSync(process.execPath, [npmCli, 'pack', '--json', '-
 });
 
 try {
-  const [packResult] = JSON.parse(packedFiles);
-  assert.ok(packResult?.filename, 'npm pack did not report a package filename');
+  const packResults = parseNpmPackOutput(packedFiles);
+  assert.equal(packResults.length, 1, 'npm pack must report exactly one package result');
+  const [packResult] = packResults;
+  assert.ok(packResult && typeof packResult === 'object', 'npm pack result must be an object');
+  assert.equal(typeof packResult.filename, 'string', 'npm pack did not report a package filename');
+  assert.equal(packResult.filename, basename(packResult.filename), 'npm pack reported an unexpected package path');
+  assert.match(packResult.filename, /\.tgz$/u, 'npm pack did not report a tarball');
 
-  const tarball = join(workDir, basename(packResult.filename));
+  const tarball = join(workDir, packResult.filename);
   const entries = execFileSync('tar', ['-tf', tarball], { encoding: 'utf8' }).split(/\r?\n/u).filter(Boolean);
   const entrySet = new Set(entries);
 

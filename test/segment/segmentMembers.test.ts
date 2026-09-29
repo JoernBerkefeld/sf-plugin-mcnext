@@ -1,10 +1,7 @@
 import { Connection, Org } from '@salesforce/core';
 import { expect } from 'chai';
 import { McnClient } from '../../src/client/mcnClient.js';
-import {
-  getSegmentMembers,
-  resolveSegmentApiName,
-} from '../../src/segment/segmentMembers.js';
+import { getSegmentMembers, resolveSegmentApiName } from '../../src/segment/segmentMembers.js';
 
 type RequestArgs = { method: string; url: string };
 
@@ -34,44 +31,80 @@ async function captureError(promise: Promise<unknown>): Promise<Error> {
   throw new Error('Expected promise to reject');
 }
 
+const notFound = (): Error => Object.assign(new Error('Segment not found'), { errorCode: 'ITEM_NOT_FOUND' });
+const listEnvelope = (segments: Array<Record<string, unknown>>): Record<string, unknown> => ({
+  segments,
+  batchSize: segments.length || 200,
+  offset: 0,
+  totalSize: segments.length,
+});
+
 describe('segment-member service', () => {
-  it('uses a valid API name from the segment detail endpoint', async () => {
-    const { client, urls } = await clientReturning([{ apiName: 'Annual_Promo' }]);
+  it('uses a valid API name from the segment detail envelope', async () => {
+    const { client, urls } = await clientReturning([{ segments: [{ apiName: 'Annual_Promo' }] }]);
 
     expect(await resolveSegmentApiName(client, 'Annual_Promo')).to.equal('Annual_Promo');
     expect(urls).to.deep.equal(['/services/data/v67.0/ssot/segments/Annual_Promo']);
   });
 
-  it('resolves an API name through the segment list when detail lookup is unavailable', async () => {
-    const notFound = Object.assign(new Error('Segment not found'), { errorCode: 'ITEM_NOT_FOUND' });
+  it('resolves an exact 18-character MarketSegment ID through the segment list', async () => {
+    const segment = { apiName: 'Annual_Promo', marketSegmentId: '1sg000000000001AAA' };
+    const { client } = await clientReturning([notFound(), listEnvelope([segment])]);
+
+    expect(await resolveSegmentApiName(client, segment.marketSegmentId)).to.equal('Annual_Promo');
+  });
+
+  it('resolves an exact 15-character MarketSegment ID through the segment list', async () => {
+    const segment = { apiName: 'Annual_Promo', marketSegmentId: '1sg000000000001' };
+    const { client } = await clientReturning([notFound(), listEnvelope([segment])]);
+
+    expect(await resolveSegmentApiName(client, segment.marketSegmentId)).to.equal('Annual_Promo');
+  });
+
+  it('resolves an exact case-sensitive display name through the segment list', async () => {
+    const segment = { apiName: 'Annual_Promo', displayName: 'Annual Promo' };
+    const exact = await clientReturning([notFound(), listEnvelope([segment])]);
+    const wrongCase = await clientReturning([notFound(), listEnvelope([segment])]);
+
+    expect(await resolveSegmentApiName(exact.client, segment.displayName)).to.equal('Annual_Promo');
+    expect((await captureError(resolveSegmentApiName(wrongCase.client, 'annual promo'))).name).to.equal('ITEM_NOT_FOUND');
+  });
+
+  it('rejects ambiguous exact display-name matches', async () => {
     const { client } = await clientReturning([
-      notFound,
-      { segments: [{ apiName: 'Annual_Promo' }], batchSize: 1, offset: 0, totalSize: 1 },
+      notFound(),
+      listEnvelope([
+        { apiName: 'First', displayName: 'Duplicate' },
+        { apiName: 'Second', displayName: 'Duplicate' },
+      ]),
     ]);
 
-    expect(await resolveSegmentApiName(client, 'Annual_Promo')).to.equal('Annual_Promo');
+    const error = await captureError(resolveSegmentApiName(client, 'Duplicate'));
+    expect(error.name).to.equal('AmbiguousSegmentError');
+    expect(error.message).to.contain('ambiguous');
   });
 
-  it('resolves a MarketSegment ID or exact display name through the segment list', async () => {
-    const notFound = Object.assign(new Error('Segment not found'), { errorCode: 'ITEM_NOT_FOUND' });
-    const segment = {
-      apiName: 'Annual_Promo',
-      displayName: 'Annual Promo',
-      marketSegmentId: '1sg000000000001',
-    };
-    const byId = await clientReturning([notFound, { segments: [segment], batchSize: 1, offset: 0, totalSize: 1 }]);
-    const byName = await clientReturning([notFound, { segments: [segment], batchSize: 1, offset: 0, totalSize: 1 }]);
+  for (const [label, response] of [
+    ['empty segments', { segments: [] }],
+    ['multiple segments', { segments: [{ apiName: 'First' }, { apiName: 'Second' }] }],
+    ['missing apiName', { segments: [{}] }],
+    ['whitespace apiName', { segments: [{ apiName: '   ' }] }],
+  ] as const) {
+    it(`fails closed for a successful detail response with ${label}`, async () => {
+      const { client, urls } = await clientReturning([response, listEnvelope([{ apiName: 'Fallback' }])]);
 
-    expect(await resolveSegmentApiName(byId.client, segment.marketSegmentId)).to.equal('Annual_Promo');
-    expect(await resolveSegmentApiName(byName.client, segment.displayName)).to.equal('Annual_Promo');
-  });
+      const error = await captureError(resolveSegmentApiName(client, 'Selection'));
+      expect(error.name).to.equal('InvalidSegmentDetailResponse');
+      expect(error.message).to.equal(
+        'Segment detail response must contain exactly one segment with a non-empty apiName.'
+      );
+      expect(urls).to.deep.equal(['/services/data/v67.0/ssot/segments/Selection']);
+    });
+  }
 
   it('preserves ITEM_NOT_FOUND when neither detail nor list resolves the selection', async () => {
-    const notFound = Object.assign(new Error('Segment not found: Missing'), { errorCode: 'ITEM_NOT_FOUND' });
-    const { client } = await clientReturning([
-      notFound,
-      { segments: [], batchSize: 200, offset: 0, totalSize: 0 },
-    ]);
+    const missing = Object.assign(new Error('Segment not found: Missing'), { errorCode: 'ITEM_NOT_FOUND' });
+    const { client } = await clientReturning([missing, listEnvelope([])]);
 
     const error = await captureError(resolveSegmentApiName(client, 'Missing'));
     expect(error.name).to.equal('ITEM_NOT_FOUND');
@@ -80,7 +113,7 @@ describe('segment-member service', () => {
 
   it('parses data and safely follows the observed nextPageUrl', async () => {
     const { client, urls } = await clientReturning([
-      { apiName: 'Annual_Promo' },
+      { segments: [{ apiName: 'Annual_Promo' }] },
       {
         data: [{ id: 'opaque-a', deltaType: 'new' }],
         limit: 1,
@@ -118,7 +151,7 @@ describe('segment-member service', () => {
 
   it('preserves INVALID_API_INPUT from the members endpoint', async () => {
     const invalidInput = Object.assign(new Error('Invalid value for FIELDS'), { errorCode: 'INVALID_API_INPUT' });
-    const { client } = await clientReturning([{ apiName: 'Annual_Promo' }, invalidInput]);
+    const { client } = await clientReturning([{ segments: [{ apiName: 'Annual_Promo' }] }, invalidInput]);
 
     const error = await captureError(
       getSegmentMembers(client, 'Annual_Promo', { fields: 'DefinitelyNotARealMemberField__c', limit: 1 })

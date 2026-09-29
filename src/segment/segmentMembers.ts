@@ -66,9 +66,26 @@ export async function listSegments(client: McnClient): Promise<SegmentDescriptor
 
 /** Fetch one segment descriptor by API name. */
 export async function showSegment(client: McnClient, apiName: string): Promise<SegmentDescriptor> {
-  return client.request<SegmentDescriptor>({
+  const body = await client.request<unknown>({
     path: `${SEGMENTS_PATH}/${encodeURIComponent(apiName)}`,
   });
+  const segments =
+    typeof body === 'object' && body !== null && !Array.isArray(body)
+      ? (body as Record<string, unknown>).segments
+      : undefined;
+  const segment = Array.isArray(segments) && segments.length === 1 ? (segments as unknown[])[0] : undefined;
+  const candidateApiName =
+    typeof segment === 'object' && segment !== null && !Array.isArray(segment)
+      ? (segment as SegmentDescriptor).apiName
+      : undefined;
+  const resolvedApiName = typeof candidateApiName === 'string' ? candidateApiName.trim() : undefined;
+  if (!resolvedApiName) {
+    throw new SfError(
+      'Segment detail response must contain exactly one segment with a non-empty apiName.',
+      'InvalidSegmentDetailResponse'
+    );
+  }
+  return { ...(segment as SegmentDescriptor), apiName: resolvedApiName };
 }
 
 /** Resolve an API name directly, or through an exact MarketSegment ID or display-name match. */
@@ -76,7 +93,7 @@ export async function resolveSegmentApiName(client: McnClient, selection: string
   let directError: unknown;
   try {
     const segment = await showSegment(client, selection);
-    return segment.apiName ?? selection;
+    return segment.apiName as string;
   } catch (error) {
     if ((error as Error).name !== 'ITEM_NOT_FOUND') throw error;
     directError = error;

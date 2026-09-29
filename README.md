@@ -10,8 +10,6 @@ The plugin adds commands where Marketing Cloud Next needs a dedicated workflow a
 - The current Salesforce CLI.
 - An authorized Salesforce org with the Marketing Cloud Next or Data 360 features and permissions required by the command you run.
 
-Install or update the Salesforce CLI:
-
 ```bash
 npm install --global @salesforce/cli
 sf --version
@@ -19,371 +17,404 @@ sf --version
 
 ## Install or update the plugin
 
-Install the current npm release:
-
 ```bash
 sf plugins install sf-plugin-mcnext
-sf plugins
-```
-
-Update installed Salesforce CLI plugins:
-
-```bash
 sf plugins update
 ```
 
-The current npm release is `0.6.0` and includes all 15 commands described below, including the experimental bounded CMS migration executor.
+Version `0.6.1` exposes the 15 public commands documented below.
 
-The separate [`sf-plugin-cms`](https://github.com/JoernBerkefeld/sf-plugin-cms) provider is optional. Install it only for CMS-aware migration planning or the experimental CMS execution workflow:
+The separate [`sf-plugin-cms`](https://github.com/JoernBerkefeld/sf-plugin-cms) provider is optional and is needed only for CMS-aware migration planning or experimental CMS execution. Version `0.4.0` is the minimum supported version, but its advertised contract and capabilities must also be compatible.
 
 ```bash
 sf plugins install sf-plugin-cms@0.4.0
-sf plugins inspect sf-plugin-cms --json
 sf cms info --contract-version 1 --json
 ```
 
-`sf-plugin-cms` `0.4.0` is the minimum supported version, but the advertised contract and capabilities must also be compatible. This plugin never installs, upgrades, downgrades, or repairs the CMS provider.
-
 ## Quick start
 
-Authorize an org and confirm the alias:
+The examples use safe representative values such as `my-mcnext-org`, `Annual_Promo`, and `00D000000000001AAA`. Replace those values for your environment.
 
 ```bash
 sf org login web --alias my-mcnext-org --instance-url https://login.salesforce.com
-sf org display --target-org my-mcnext-org
-```
-
-Use your My Domain or the correct Salesforce login URL when required.
-
-Discover the available capabilities without connecting to an org:
-
-```bash
 sf mcnext list types
-sf mcnext --help
+sf mcnext segment members export --target-org my-mcnext-org --segment Annual_Promo --output-file members.csv --max-items 100
 ```
 
-Inspect complete flags and examples for any command:
+The hidden `mcn` topic is a short alias for `mcnext`; this README uses canonical `mcnext` command names. Run `sf <command> --help` before using unfamiliar flags or a mutating operation.
+
+## Common inherited options
+
+Every command inherits the following oclif options. Command-specific tables link here instead of duplicating them.
+
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| [`--json`](#common-inherited-options) | No | Boolean. Formats the command result as JSON. This controls CLI result output; it does not replace command-specific output files. |
+| [`--flags-dir <directory>`](#common-inherited-options) | No | String path to a directory from which oclif imports flag values. Not repeatable. |
+
+## Command inventory
+
+- [`sf mcnext list types`](#sf-mcnext-list-types)
+- [`sf mcnext segment members export`](#sf-mcnext-segment-members-export)
+- [`sf mcnext segment records export`](#sf-mcnext-segment-records-export)
+- [`sf mcnext identity-resolution list`](#sf-mcnext-identity-resolution-list)
+- [`sf mcnext identity-resolution show`](#sf-mcnext-identity-resolution-show)
+- [`sf mcnext identity-resolution export`](#sf-mcnext-identity-resolution-export)
+- [`sf mcnext email send-definition show`](#sf-mcnext-email-send-definition-show)
+- [`sf mcnext email-template show`](#sf-mcnext-email-template-show)
+- [`sf mcnext data-graph metadata`](#sf-mcnext-data-graph-metadata)
+- [`sf mcnext identity-resolution plan`](#sf-mcnext-identity-resolution-plan)
+- [`sf mcnext flow source`](#sf-mcnext-flow-source)
+- [`sf mcnext migration plan`](#sf-mcnext-migration-plan)
+- [`sf mcnext segment definition create`](#sf-mcnext-segment-definition-create)
+- [`sf mcnext campaign config`](#sf-mcnext-campaign-config)
+- [`sf mcnext migration cms`](#sf-mcnext-migration-cms)
+
+## `sf mcnext list types`
+
+Lists capability ownership, support state, operations, delegation targets, and limitations without accessing an org.
 
 ```bash
-sf mcnext segment members export --help
-```
-
-Start with a bounded, read-only export:
-
-```bash
-sf mcnext segment members export \
-  --target-org my-mcnext-org \
-  --segment My_Published_Segment \
-  --output-file members.csv \
-  --max-items 100
-```
-
-The hidden `mcn` topic is a short alias for `mcnext`; this README uses `mcnext` throughout.
-
-## Command guide
-
-The npm `0.6.0` release exposes 15 commands.
-
-| Command                                                                       | Availability                            | Behavior                                                         | Purpose                                                                        |
-| ----------------------------------------------------------------------------- | --------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [`sf mcnext list types`](#command-list-types)                                 | npm `0.6.0`                             | Read-only                                                        | Show capability ownership, support state, operations, and delegation targets.  |
-| [`sf mcnext segment members export`](#command-segment-members-export)         | npm `0.6.0`                             | Read-only; writes a local file                                   | Export computed segment members to bounded CSV or JSON output.                 |
-| [`sf mcnext segment records export`](#command-segment-records-export)         | npm `0.6.0`                             | Read-only; writes a local file                                   | Export `MarketSegment` records through core `sf data export bulk`.             |
-| [`sf mcnext identity-resolution list`](#command-identity-resolution-list)     | npm `0.6.0`                             | Read-only                                                        | List identity-resolution ruleset configurations and aggregate status.          |
-| [`sf mcnext identity-resolution show`](#command-identity-resolution-show)     | npm `0.6.0`                             | Read-only                                                        | Retrieve one ruleset configuration by exact ID.                                |
-| [`sf mcnext identity-resolution export`](#command-identity-resolution-export) | npm `0.6.0`                             | Read-only; writes a local file                                   | Export one ruleset configuration as JSON.                                      |
-| [`sf mcnext email send-definition show`](#command-email-send-definition-show) | npm `0.6.0`                             | Read-only                                                        | Read one exact `ListEmail` send-definition record through core Salesforce CLI. |
-| [`sf mcnext email-template show`](#command-email-template-show)               | npm `0.6.0`                             | Read-only                                                        | Read one CMS email template by managed content ID.                             |
-| [`sf mcnext data-graph metadata`](#command-data-graph-metadata)               | npm `0.6.0`                             | Read-only                                                        | Retrieve accessible Data 360 Data Graph metadata with an external token.       |
-| [`sf mcnext identity-resolution plan`](#command-identity-resolution-plan)     | npm `0.6.0`                             | Read-only; writes plan output with `--json` or shell redirection | Build a conflict-checked CREATE plan or exact UPDATE shell without mutation.   |
-| [`sf mcnext flow source`](#command-flow-source)                               | npm `0.6.0`                             | Read-only or mutating, selected by `--operation`                 | Retrieve, validate, create, or update one selected Flow source.                |
-| [`sf mcnext migration plan`](#command-migration-plan)                         | npm `0.6.0`                             | Read-only; writes a local plan                                   | Assess source-to-target prerequisites, ownership, transport, and dependencies. |
-| [`sf mcnext segment definition create`](#command-segment-definition-create)   | npm `0.6.0`                             | Mutating unless `--dry-run`                                      | Validate and create one explicitly mapped segment definition.                  |
-| [`sf mcnext campaign config`](#command-campaign-config)                       | npm `0.6.0`                             | Read-only or mutating, selected by `--operation`                 | Export, create, or update a bounded Campaign configuration.                    |
-| [`sf mcnext migration cms`](#command-migration-cms)                           | npm `0.6.0`                             | Dry-run by default; mutating with `--apply`                      | Preflight or execute bounded CMS routes through `sf-plugin-cms`.               |
-
-Every command supports command-level help. Run `sf <command> --help`, for example `sf mcnext migration plan --help`, before using unfamiliar flags or any mutating operation.
-
-### Discover capabilities
-
-<a id="command-list-types"></a>
-
-#### `sf mcnext list types`
-
-Lists each known capability, its owner, support state, operations, delegation target, and limitations. It does not access an org. Use `--provider` or `--state` to filter the output; run `sf mcnext list types --help` for all options.
-
-```bash
-sf mcnext list types
 sf mcnext list types --provider core-sf
 sf mcnext list types --state conditional
 ```
 
-A listed capability is not necessarily implemented by this plugin:
+### Options
 
-- `implemented`: the plugin exposes the listed operation.
-- `delegated`: use the indicated core `sf` command or transport.
-- `conditional`: evidence exists, but safe portable behavior is not fully established.
-- `deferred`: intentionally unsupported.
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--provider <provider>` | No | One of `mcnext`, `core-sf`, `cms-service`, `external/manual`, `secondary-data`. Not repeatable. |
+| `--state <state>` | No | One of `implemented`, `delegated`, `conditional`, `deferred`. Not repeatable. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
 
-### Read and export data
+## `sf mcnext segment members export`
 
-These commands are read-only with respect to Salesforce orgs. Commands that accept `--output-file` write local files.
+Resolves a segment and incrementally exports computed SSOT member rows. `--segment` accepts exactly these three identifier forms: the segment API/developer name, the exact display name, or a 15- or 18-character `MarketSegment` record ID. Display-name matches must be exact and unambiguous.
 
-<a id="command-segment-members-export"></a>
+CSV uses the first returned row's keys as a stable header and column set, escapes delimiter/quote/newline values, and defaults to comma plus LF. JSON is a streamed JSON array containing the returned row objects. The endpoint's member `id` is preserved unchanged; it is an opaque SSOT/Watson membership value, not a claimed Salesforce CRM record ID.
 
-#### `sf mcnext segment members export`
-
-Read-only against the org; writes computed members to the required `--output-file`. Select the segment with `--segment`, choose CSV or JSON with `--result-format`, and bound paging with `--max-pages`, `--max-items`, or `--max-duration-ms`. Run `sf mcnext segment members export --help` for filtering, ordering, and delimiter flags.
-
-<a id="command-segment-records-export"></a>
-
-#### `sf mcnext segment records export`
-
-Read-only against the org; delegates a `MarketSegment` bulk export to core Salesforce CLI and writes the required `--output-file`. The primary flags are `--target-org`, `--result-format`, `--wait`, and optional core export settings. Run `sf mcnext segment records export --help` for the complete delegated usage.
-
-<a id="command-identity-resolution-list"></a>
-
-#### `sf mcnext identity-resolution list`
-
-Read-only. Lists ruleset configuration and aggregate status for `--target-org`; `--api-version` is optional and limited to the supported baseline. Run `sf mcnext identity-resolution list --help` for complete usage.
-
-<a id="command-identity-resolution-show"></a>
-
-#### `sf mcnext identity-resolution show`
-
-Read-only. Retrieves one ruleset configuration selected by required `--ruleset-id` from `--target-org`. Run `sf mcnext identity-resolution show --help` for complete usage.
-
-<a id="command-identity-resolution-export"></a>
-
-#### `sf mcnext identity-resolution export`
-
-Read-only against the org; writes one complete ruleset configuration to the required `--output-file`. Select it with `--ruleset-id` and `--target-org`. Run `sf mcnext identity-resolution export --help` for complete usage.
-
-<a id="command-email-send-definition-show"></a>
-
-#### `sf mcnext email send-definition show`
-
-Read-only. Retrieves one exact `ListEmail` record through core Salesforce CLI using `--target-org` and `--record-id`; it does not publish or send email. Run `sf mcnext email send-definition show --help` for complete usage.
-
-<a id="command-email-template-show"></a>
-
-#### `sf mcnext email-template show`
-
-Read-only. Retrieves one CMS email template by exact `--content-id` from `--target-org` and verifies its content type. Run `sf mcnext email-template show --help` for complete usage.
-
-<a id="command-data-graph-metadata"></a>
-
-#### `sf mcnext data-graph metadata`
-
-Read-only. Performs one metadata GET against `--instance-url` using the bearer token stored in `--access-token-file`; it does not obtain or persist tokens. Run `sf mcnext data-graph metadata --help` for complete usage.
-
-Examples:
+`--fields`, `--filters`, and `--order-by` are passed to the verified members endpoint as provided. `--limit` is the requested page size and `--offset` is the zero-based starting offset. Subsequent pages follow the API's returned next-page URL, preserving its server-provided query. The default safety bounds are 1,000 pages, 1,000,000 items, and 900,000 ms; explicit maximum flags override the corresponding bound. If a bound or request error stops paging, the partially written file remains on disk and the command reports it as incomplete.
 
 ```bash
-sf mcnext segment records export \
-  --target-org my-mcnext-org \
-  --output-file segments.csv
-
-sf mcnext identity-resolution export \
-  --target-org my-mcnext-org \
-  --ruleset-id 1ir000000000001AAA \
-  --output-file identity-resolution.json
-
-sf mcnext email-template show \
-  --target-org my-mcnext-org \
-  --content-id 20Y000000000001AAA \
-  --api-version 67.0
+sf mcnext segment members export --target-org my-mcnext-org --segment Annual_Promo --output-file members.csv
+sf mcnext segment members export --target-org my-mcnext-org --segment "Annual Promo" --output-file members.json --result-format json --fields Id__c,Delta_Type__c --filters "Delta_Type__c in ('new')" --order-by "Id__c asc" --limit 100 --offset 0
+sf mcnext segment members export --target-org my-mcnext-org --segment 1sg000000000001AAA --output-file members.csv --max-pages 10 --max-items 1000 --max-duration-ms 60000
 ```
 
-For Data Graph metadata, obtain the Data 360 token outside this plugin and keep the token file outside the repository:
+### Options
+
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--target-org <alias-or-username>`, `-o` | Yes | Authorized Marketing Cloud Next org alias or username. String; not repeatable. |
+| `--segment <identifier>`, `-s` | Yes | Segment API/developer name, exact display name, or 15/18-character `MarketSegment` record ID. String; not repeatable. |
+| `--output-file <path>` | Yes | Destination CSV or JSON file. Parent directories are created; the file is overwritten and written incrementally. |
+| `--result-format <format>` | No | `csv` or `json`; default `csv`. |
+| `--fields <field-list>` | No | Comma-separated SSOT storage fields, for example `Id__c,Delta_Type__c`; passed through to the endpoint. |
+| `--filters <expression>` | No | Endpoint filter expression, for example `Delta_Type__c in ('new')`; passed through unchanged. |
+| `--order-by <expression>` | No | Endpoint ordering expression, for example `Id__c asc`; passed through unchanged. |
+| `--limit <integer>` | No | Rows requested per page; integer `>= 1`; default `200`. |
+| `--offset <integer>` | No | Zero-based first-page offset; integer `>= 0`; default `0`. |
+| `--max-pages <integer>` | No | Paging safety bound; integer `>= 1`; default client bound `1000`. Exceeding it leaves an incomplete file and fails. |
+| `--max-items <integer>` | No | Row safety bound; integer `>= 1`; default client bound `1000000`. Exceeding it leaves an incomplete file and fails. |
+| `--max-duration-ms <integer>` | No | Paging-time safety bound in milliseconds; integer `>= 1`; default client bound `900000`. Exceeding it leaves an incomplete file and fails. |
+| `--column-delimiter <name>` | No | CSV only: `BACKQUOTE`, `CARET`, `COMMA`, `PIPE`, `SEMICOLON`, or `TAB`; default `COMMA`. |
+| `--line-ending <name>` | No | CSV only: `LF` or `CRLF`; default `LF`. |
+| `--api-version <version>` | No | Salesforce API version; only the retained `67.0` baseline is accepted by this direct MCN command. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
+
+## `sf mcnext segment records export`
+
+Delegates a `MarketSegment` bulk export to core `sf data export bulk`, selecting `Id`, `Name`, `MarketSegmentType`, `SegmentStatus`, and `PublishStatus`. Core Salesforce CLI owns job behavior and file creation.
 
 ```bash
-sf mcnext data-graph metadata \
-  --instance-url https://example.c360a.salesforce.com \
-  --access-token-file C:\private\data360-token.txt
+sf mcnext segment records export --target-org my-mcnext-org --output-file segments.csv
+sf mcnext segment records export --target-org my-mcnext-org --output-file segments.json --result-format json --wait 20 --api-version 67.0 --all-rows
 ```
 
-The command does not perform JWT or Data 360 token exchange. For a new setup, use a Salesforce External Client App with only the scopes and user access required by your organization. Never commit client secrets, private keys, assertions, or access tokens.
+### Options
 
-### Validate and plan without mutation
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--target-org <alias-or-username>`, `-o` | Yes | Org passed to core bulk export. String; not repeatable. |
+| `--output-file <path>` | Yes | File path passed to core bulk export; core bulk export creates or overwrites the result file according to its own behavior. |
+| `--result-format <format>` | No | `csv` or `json`; default `csv`. |
+| `--wait <minutes>`, `-w` | No | Integer `>= 0`; default `10`. Passed to core bulk export. |
+| `--api-version <version>` | No | API version override passed to core bulk export, for example `67.0`. |
+| `--all-rows` | No | Boolean; includes soft-deleted records; default `false`. |
+| `--column-delimiter <name>` | No | CSV: `BACKQUOTE`, `CARET`, `COMMA`, `PIPE`, `SEMICOLON`, or `TAB`. |
+| `--line-ending <name>` | No | CSV: `LF` or `CRLF`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
 
-<a id="command-identity-resolution-plan"></a>
+## `sf mcnext identity-resolution list`
 
-#### `sf mcnext identity-resolution plan`
-
-Builds a conflict-checked CREATE plan or exact UPDATE shell using read-only target discovery. It never sends `POST` or `PATCH` requests and does not produce an executable mutation payload. Select the mode with `--intent`, bind both orgs and expected org IDs, and provide `--input-file`; run `sf mcnext identity-resolution plan --help` for update-shell safeguards.
+Lists ruleset configurations and aggregate status from one non-paginated collection request. It does not export unified-profile rows.
 
 ```bash
-sf mcnext identity-resolution plan \
-  --intent create \
-  --source-org source-mcn \
-  --target-org target-mcn \
-  --expected-source-org-id 00D000000000001AAA \
-  --expected-target-org-id 00D000000000002AAA \
-  --input-file identity-resolution-plan.json \
-  --api-version 67.0
+sf mcnext identity-resolution list --target-org my-mcnext-org --api-version 67.0
 ```
 
-<a id="command-flow-source"></a>
+### Options
 
-#### `sf mcnext flow source`
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--target-org <alias-or-username>`, `-o` | Yes | Authorized MCN org. String; not repeatable. |
+| `--api-version <version>` | No | Only retained baseline `67.0`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
 
-Use `--operation retrieve|validate` for read-only retrieval or check-only validation. Use `--operation create|update` for the bounded mutating workflow described below. Primary flags for read-only use are `--member`, `--target-org`, and `--project-dir`; run `sf mcnext flow source --help` before selecting an operation.
+## `sf mcnext identity-resolution show`
 
-Retrieves selected Flow source or validates it through a core check-only deployment. `validate` does not apply a deployment.
+Retrieves one ruleset configuration by Salesforce ruleset ID.
 
 ```bash
-sf mcnext flow source \
-  --operation validate \
-  --member MyFlow \
-  --target-org target-mcn \
-  --project-dir ./project
+sf mcnext identity-resolution show --target-org my-mcnext-org --ruleset-id 1ir000000000001AAA --api-version 67.0
 ```
 
-<a id="command-migration-plan"></a>
+### Options
 
-#### `sf mcnext migration plan`
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--target-org <alias-or-username>`, `-o` | Yes | Authorized MCN org. |
+| `--ruleset-id <id>` | Yes | Exact Salesforce identity-resolution ruleset ID. |
+| `--api-version <version>` | No | Only retained baseline `67.0`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
 
-Writes the required `--output-file` as a deterministic, read-only source-to-target assessment. The primary inputs are `--source-org` and `--target-org`; run `sf mcnext migration plan --help` before adding optional CMS evidence or planning flags. It checks prerequisites and records capability ownership, support, transport, and dependency evidence. It never deploys, imports, rewrites references, creates target payloads, or mutates either org.
+## `sf mcnext identity-resolution export`
 
-Basic assessment:
+Writes one complete ruleset configuration as JSON.
 
 ```bash
-sf mcnext migration plan \
-  --source-org source-mcn \
-  --target-org target-mcn \
-  --output-file migration-plan.json
+sf mcnext identity-resolution export --target-org my-mcnext-org --ruleset-id 1ir000000000001AAA --output-file identity-resolution.json --api-version 67.0
 ```
 
-Add CMS planning with a separately installed compatible CMS provider:
+### Options
+
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--target-org <alias-or-username>`, `-o` | Yes | Authorized MCN org. |
+| `--ruleset-id <id>` | Yes | Exact Salesforce identity-resolution ruleset ID. |
+| `--output-file <path>` | Yes | Destination JSON configuration file. Parent directories are created and an existing file is overwritten. |
+| `--api-version <version>` | No | Only retained baseline `67.0`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
+
+## `sf mcnext email send-definition show`
+
+Delegates an exact read of one `ListEmail` record to core `sf data get record`. It does not publish or send email.
 
 ```bash
-sf mcnext migration plan \
-  --source-org source-mcn \
-  --target-org target-mcn \
-  --output-file migration-plan.json \
-  --cms-plan \
-  --cms-workspace-map cms-workspaces.json \
-  --cms-export-dir .mcnext-runs/cms-export
+sf mcnext email send-definition show --target-org my-mcnext-org --record-id 0XB000000000001AAA --api-version 67.0
 ```
 
-`--cms-plan`, `--cms-workspace-map`, and `--cms-export-dir` must be used together. The workspace map must explicitly map canonical source workspace IDs to target workspace IDs; names are not routing keys.
+### Options
 
-CMS planning runs one read-only aggregate Marketing workspace export and validates provider contracts, package integrity, provenance, correlations, and routes. Even valid package and route evidence can remain `ownership-uncertain`; the plan does not claim that a CMS route is safe to execute unless all required evidence exists.
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--target-org <alias-or-username>`, `-o` | Yes | Authorized Salesforce org. |
+| `--record-id <id>` | Yes | Exact Salesforce `ListEmail` record ID. |
+| `--api-version <version>` | No | API version passed to the core command, for example `67.0`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
 
-### Create or update configuration
+## `sf mcnext email-template show`
 
-The following commands can mutate an org. Read `sf <command> --help`, verify every org ID and file, and use validation or dry-run behavior first where available.
-
-<a id="command-segment-definition-create"></a>
-
-#### `sf mcnext segment definition create`
-
-This is a mutating strict-CREATE command unless `--dry-run` is supplied. It requires explicit source and target org bindings, a selected metadata file, member name, and mapping file; run `sf mcnext segment definition create --help` and validate with `--dry-run` before apply.
+Reads one CMS email template by managed content ID and verifies content type `sfdc_cms__emailTemplate`.
 
 ```bash
-sf mcnext segment definition create \
-  --source-org source-mcn \
-  --target-org target-mcn \
-  --expected-source-org-id 00D000000000001AAA \
-  --expected-target-org-id 00D000000000002AAA \
-  --project-dir ./project \
-  --source-file force-app/main/default/marketSegmentDefinitions/FreshSegment.marketSegmentDefinition-meta.xml \
-  --member FreshSegment \
-  --mapping-file mappings/segment.json \
-  --dry-run
+sf mcnext email-template show --target-org my-mcnext-org --content-id 20Y000000000001AAA --api-version 67.0
 ```
 
-`--dry-run` performs core check-only validation and stops before apply. Without it, the command rechecks org identities and target absence, applies once, retrieves the result independently, and performs bounded read-only correlation checks. A `pending` result exits with code `69`; investigate it instead of rerunning CREATE. UPDATE, upsert, publication, scheduling, and membership execution are not supported.
+### Options
 
-#### Flow source CREATE or UPDATE
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--target-org <alias-or-username>`, `-o` | Yes | Authorized Salesforce org. |
+| `--content-id <id>` | Yes | Exact 18-character managed content ID. |
+| `--api-version <version>` | No | Retained supported baseline `67.0`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
 
-`sf mcnext flow source --operation create|update` is the mutating mode of the [Flow source command](#command-flow-source). It transports one inactive same-org Flow draft through core Metadata API operations. Both operations require exactly one `--member`, plus `--source-file`, `--expected-org-id`, `--source-org-id`, and `--reuse-same-org-references`. The source and destination org IDs must match; cross-org reference mapping is unsupported.
+## `sf mcnext data-graph metadata`
+
+Performs one read-only `GET /api/v1/dataGraph/metadata`. Obtain the Data 360 bearer token outside this plugin and keep its file outside the repository.
 
 ```bash
-sf mcnext flow source \
-  --operation create \
-  --member MyFlow \
-  --target-org target-mcn \
-  --project-dir ./project \
-  --source-file force-app/main/default/flows/MyFlow.flow-meta.xml \
-  --expected-org-id 00D000000000002AAA \
-  --source-org-id 00D000000000002AAA \
-  --reuse-same-org-references
+sf mcnext data-graph metadata --instance-url https://example.c360a.salesforce.com --access-token-file "C:\private\data360-token.txt"
 ```
 
-UPDATE additionally requires `--expected-definition-id` and `--expected-latest-version-id`. A normal update may change only the top-level Flow `label` or `interviewLabel`; an exact unchanged repeat requires `--expect-unchanged`. Activation, execution, sending, and publication are unsupported. A pending core job is not success; inspect it before retrying.
+### Options
 
-<a id="command-campaign-config"></a>
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--instance-url <url>` | Yes | Tenant-specific HTTPS Data 360 instance URL. Non-HTTPS URLs are rejected. |
+| `--access-token-file <path>` | Yes | Existing private file containing exactly one non-whitespace bearer token. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
 
-#### `sf mcnext campaign config`
+## `sf mcnext identity-resolution plan`
 
-Select read-only export or mutating create/update with required `--operation`. The command also requires explicit org identity, API version, and project directory; operation-specific flags select the record, input/output file, target name, or journal. Run `sf mcnext campaign config --help` before create or update.
-
-It supports only these Campaign fields: `Name`, `Type`, `Status`, `IsActive`, and `Description`.
+Builds a GET-only, conflict-checked CREATE plan or an exact UPDATE shell. It never sends a mutation request and does not produce an executable mutation payload.
 
 ```bash
-sf mcnext campaign config \
-  --operation create \
-  --target-org target-mcn \
-  --expected-org-id 00D000000000002AAA \
-  --api-version 67.0 \
-  --project-dir . \
-  --input-file campaign.json \
-  --target-name "New campaign" \
-  --journal-file campaign-created.json
+sf mcnext identity-resolution plan --intent create --source-org source-mcn --target-org target-mcn --expected-source-org-id 00D000000000001AAA --expected-target-org-id 00D000000000002AAA --input-file identity-resolution-plan.json --api-version 67.0
+sf mcnext identity-resolution plan --intent update-shell --source-org source-mcn --target-org target-mcn --expected-source-org-id 00D000000000001AAA --expected-target-org-id 00D000000000002AAA --target-ruleset-id 1ir000000000001AAA --expected-target-label "Marketing Rules" --expected-target-key Individual__dlm --expected-target-status DRAFT --input-file identity-resolution-plan.json --api-version 67.0
 ```
 
-CREATE writes a private pending journal before mutation. UPDATE requires the exact record ID and expected current name and cannot rename or upsert. Relationships, custom fields, null clearing, and lifecycle operations are unsupported. Reconcile ambiguous writes manually; do not retry blindly.
+### Options
 
-<a id="command-migration-cms"></a>
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--intent <intent>` | Yes | `create` or `update-shell`. |
+| `--source-org <alias-or-username>` | Yes | Source MCN org. |
+| `--target-org <alias-or-username>`, `-o` | Yes | Different target MCN org. |
+| `--expected-source-org-id <id>` | Yes | Expected 18-character source org ID. |
+| `--expected-target-org-id <id>` | Yes | Expected 18-character target org ID; must differ from source. |
+| `--target-ruleset-id <id>` | For `update-shell` | Exact target ruleset ID. Forbidden for `create`. |
+| `--expected-target-label <label>` | For `update-shell` | Exact target label. Forbidden for `create`. |
+| `--expected-target-key <key>` | For `update-shell` | Exact target object API name/read-only key. Forbidden for `create`. |
+| `--expected-target-status <status>` | For `update-shell` | Exact target status. Forbidden for `create`. |
+| `--input-file <path>` | Yes | JSON containing only `configuration` and `mappings`. |
+| `--api-version <version>` | No | Only retained baseline `67.0`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
 
-## `sf mcnext migration cms` — experimental bounded execution
+## `sf mcnext flow source`
 
-Dry-run is the default; `--apply` enables mutation only after every selected route passes preflight and dry-run. Required inputs bind the target org, migration `--plan-file`, new `--result-file`, and `--report-root`; `--allow-experimental-cms` is always required. Run `sf mcnext migration cms --help` before use.
-
-The command consumes CMS package and workspace-route evidence from `sf mcnext migration plan` and calls the separately installed `sf-plugin-cms` public CLI contract. The executor checks successful provider export/package evidence, but it does not require the plan to classify a route as `ready-for-execution`; an `ownership-uncertain` route can therefore reach dry-run.
-
-Inspect the complete command contract:
+Retrieves or validates selected Flow source through core CLI, or creates/updates one inactive same-org draft. `retrieve` and `validate` accept repeatable exact members. `create` and `update` require exactly one member and do not support cross-org mapping, activation, execution, sending, or publication.
 
 ```bash
-sf mcnext migration cms --help
+sf mcnext flow source --operation retrieve --member MyFlow --target-org my-mcnext-org --project-dir ./project
+sf mcnext flow source --operation validate --member MyFlow --target-org my-mcnext-org --project-dir ./project --wait 10
+sf mcnext flow source --operation create --member FreshFlow --target-org my-mcnext-org --project-dir ./project --source-file force-app/main/default/flows/FreshFlow.flow-meta.xml --expected-org-id 00D000000000002AAA --source-org-id 00D000000000002AAA --reuse-same-org-references
+sf mcnext flow source --operation update --member MyFlow --target-org my-mcnext-org --project-dir ./project --source-file force-app/main/default/flows/MyFlow.flow-meta.xml --expected-org-id 00D000000000002AAA --source-org-id 00D000000000002AAA --reuse-same-org-references --expected-definition-id 300000000000001AAA --expected-latest-version-id 301000000000001AAA
 ```
 
-Dry-run every selected route:
+### Options
+
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--operation <operation>` | Yes | `retrieve`, `validate`, `create`, or `update`. |
+| `--member <api-name>` | Yes | Exact Flow API name. Repeatable for retrieve/validate; exactly one for create/update. Wildcards are rejected. |
+| `--target-org <alias-or-username>` | Yes | Org passed to core CLI. |
+| `--project-dir <directory>` | Yes | Existing Salesforce DX project root. |
+| `--source-file <path>` | Create/update | Inactive Core Flow XML inside a configured package directory. Mutation-only. |
+| `--expected-org-id <id>` | Create/update | Verified 18-character destination org ID. Mutation-only. |
+| `--expected-definition-id <id>` | Update | Verified 18-character existing `FlowDefinition` ID. Update-only. |
+| `--expected-latest-version-id <id>` | Update | Verified current 18-character latest Flow version ID. Update-only. |
+| `--source-org-id <id>` | Create/update | Caller-verified source org ID; must equal `--expected-org-id`. Mutation-only. |
+| `--reuse-same-org-references` | Create/update | Boolean declaration that all references were verified for reuse in the same org. Required by the mutation workflow; default `false`. |
+| `--expect-unchanged` | Update only | Boolean; default `false`. Permits an exact unchanged repeat and requires core/readback to confirm it; otherwise update requires a label/interview-label change. |
+| `--wait <minutes>` | No | Integer `1`–`30`; default `10`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
+
+## `sf mcnext migration plan`
+
+Writes a deterministic, read-only source-to-target assessment. It does not deploy, import, rewrite references, create target payloads, or mutate either org.
 
 ```bash
-sf mcnext migration cms \
-  --target-org target-mcn \
-  --expected-target-org-id 00D000000000001AAA \
-  --plan-file migration-plan.json \
-  --result-file cms-execution-result.json \
-  --report-root .mcnext-runs/cms-reports \
-  --allow-experimental-cms
+sf mcnext migration plan --source-org source-mcn --target-org target-mcn --output-file migration-plan.json
+sf mcnext migration plan --source-org source-mcn --target-org target-mcn --output-file migration-plan.json --cms-evidence-file cms-evidence.json
+sf mcnext migration plan --source-org source-mcn --target-org target-mcn --output-file migration-plan.json --cms-plan --cms-workspace-map cms-workspaces.json --cms-export-dir .mcnext-runs/cms-export
 ```
 
-The command requires `--allow-experimental-cms` even for dry-run. It writes a separate result file and never modifies the migration plan.
+### Options
 
-Do not add `--apply` when the plan still marks any route `ownership-uncertain`; a successful provider dry-run does not resolve the missing Marketing Cloud Next ownership or dependency evidence. Apply is appropriate only after that evidence has been independently resolved and the dry-run result has been reviewed.
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--source-org <alias-or-username>` | Yes | Source org used for read-only assessment. |
+| `--target-org <alias-or-username>`, `-o` | Yes | Target org used for read-only checks. |
+| `--output-file <path>` | Yes | Deterministic JSON migration plan. Parent directories are created and an existing file is overwritten. |
+| `--cms-evidence-file <path>` | No | JSON array of minimal opaque deferred CMS evidence; cannot make CMS planning executable. |
+| `--cms-plan` | No | Boolean; default `false`. Enables provider discovery and read-only aggregate CMS export. Requires both companion flags. |
+| `--cms-workspace-map <path>` | With `--cms-plan` | JSON exactly shaped as `{"version":1,"workspaces":{"<sourceWorkspaceId>":"<targetWorkspaceId>"}}`. Rejected without `--cms-plan`. |
+| `--cms-export-dir <path>` | With `--cms-plan` | New, unused run-owned export directory. Rejected without `--cms-plan`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
 
-Before mutation, all selected routes must pass preflight. Apply runs routes sequentially by source workspace ID, revalidates the target org, provider, plan fingerprint, package paths, and manifest hashes, and repeats route preflight immediately before each mutation. It stops on the first non-success result and does not retry or roll back. The plugin does not inspect CMS payloads, infer dependencies, or rewrite CMS-owned references.
+## `sf mcnext segment definition create`
+
+Strictly creates one mapped `MarketSegmentDefinition`; it never updates or upserts. Use `--dry-run` first. Without it, the command validates, rechecks identity and absence, applies once, independently retrieves, and performs bounded correlation checks.
+
+```bash
+sf mcnext segment definition create --source-org source-mcn --target-org target-mcn --expected-source-org-id 00D000000000001AAA --expected-target-org-id 00D000000000002AAA --project-dir ./project --source-file force-app/main/default/marketSegmentDefinitions/FreshSegment.marketSegmentDefinition-meta.xml --member FreshSegment --mapping-file mappings/segment.json --dry-run
+sf mcnext segment definition create --source-org source-mcn --target-org target-mcn --expected-source-org-id 00D000000000001AAA --expected-target-org-id 00D000000000002AAA --project-dir ./project --source-file force-app/main/default/marketSegmentDefinitions/FreshSegment.marketSegmentDefinition-meta.xml --member FreshSegment --mapping-file mappings/segment.json --wait 10 --visibility-polls 3
+```
+
+### Options
+
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--source-org <alias>` | Yes | Authenticated source alias used for identity provenance. |
+| `--target-org <alias>` | Yes | Authenticated target alias passed to Core and Connect. |
+| `--expected-source-org-id <id>` | Yes | Expected 18-character source org ID. |
+| `--expected-target-org-id <id>` | Yes | Expected 18-character target org ID. |
+| `--project-dir <directory>` | Yes | Existing Salesforce DX project. |
+| `--source-file <path>` | Yes | Exact `MarketSegmentDefinition` XML inside a configured package directory. |
+| `--member <api-name>` | Yes | Exact `MarketSegmentDefinition` API name. |
+| `--mapping-file <path>` | Yes | JSON explicit segment-reference mapping file, resolved from project directory. |
+| `--api-version <version>` | No | Connect API version; defaults to supported plugin baseline. |
+| `--dry-run` | No | Boolean; default `false`. Runs core check-only validation and stops before apply. |
+| `--wait <minutes>` | No | Integer `1`–`30`; default `10`. |
+| `--visibility-polls <count>` | No | Integer `1`–`10`; default `3`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
+
+## `sf mcnext campaign config`
+
+Exports, creates, or updates only `Name`, `Type`, `Status`, `IsActive`, and `Description`. Files are resolved relative to `--project-dir`. CREATE writes a private pending journal before mutation. UPDATE cannot rename or upsert and accepts only changed scalar fields.
+
+```bash
+sf mcnext campaign config --operation export --target-org target-mcn --expected-org-id 00D000000000002AAA --api-version 67.0 --project-dir . --record-id 701000000000001AAA --output-file campaign.json
+sf mcnext campaign config --operation create --target-org target-mcn --expected-org-id 00D000000000002AAA --api-version 67.0 --project-dir . --input-file campaign.json --target-name "New campaign" --journal-file campaign-created.json
+sf mcnext campaign config --operation update --target-org target-mcn --expected-org-id 00D000000000002AAA --api-version 67.0 --project-dir . --input-file campaign-patch.json --record-id 701000000000001AAA --expected-name "New campaign"
+```
+
+### Options
+
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--operation <operation>` | Yes | `export`, `create`, or `update`. |
+| `--target-org <alias-or-username>` | Yes | Explicit core CLI org. |
+| `--expected-org-id <id>` | Yes | Expected 18-character org ID. |
+| `--api-version <version>` | Yes | Explicit `NN.0` Salesforce API version, for example `67.0`. |
+| `--project-dir <directory>` | Yes | Existing project directory; relative files resolve here. |
+| `--record-id <id>` | Export/update | Exact 18-character Campaign ID. Forbidden for create. |
+| `--expected-name <name>` | Update | Exact current target name. Forbidden for export/create. |
+| `--target-name <name>` | Create | Fresh name distinct from source name. Forbidden for export/update. |
+| `--expect-unchanged` | Update only | Boolean; default `false`. Requires submitted values to equal the independent baseline before repeating the write. |
+| `--input-file <path>` | Create/update | JSON artifact containing `sourceId` and supported `fields`. Forbidden for export. |
+| `--output-file <path>` | Export | New JSON artifact; created with no overwrite. Forbidden for create/update. |
+| `--journal-file <relative-path>` | Create | Required new private identity journal inside project root; no absolute, traversal, or existing-file overwrite. Forbidden for export/update. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
+
+## `sf mcnext migration cms`
+
+Experimental bounded CMS execution. Dry-run is the default. `--apply` enables sequential create-only imports only after every selected route passes preflight and dry-run. The command stops at the first non-success and does not retry or roll back.
+
+```bash
+sf mcnext migration cms --target-org target-mcn --expected-target-org-id 00D000000000002AAA --plan-file migration-plan.json --result-file cms-result.json --report-root .mcnext-runs/cms-reports --allow-experimental-cms
+sf mcnext migration cms --target-org target-mcn --expected-target-org-id 00D000000000002AAA --plan-file migration-plan.json --result-file cms-result.json --report-root .mcnext-runs/cms-reports --allow-experimental-cms --apply
+```
+
+### Options
+
+| Option | Required | Expected/allowed values |
+| --- | --- | --- |
+| `--target-org <alias-or-username>`, `-o` | Yes | Target org resolved independently before execution. |
+| `--expected-target-org-id <id>` | Yes | Exact 18-character target org ID; must match alias resolution and plan binding. |
+| `--plan-file <path>` | Yes | Existing deterministic migration-plan JSON with CMS package/route evidence. |
+| `--result-file <path>` | Yes | New durable execution-result JSON created with no overwrite; the plan is never modified. |
+| `--report-root <path>` | Yes | Parent path for distinct provider-owned applied-import report directories. |
+| `--allow-experimental-cms` | Effectively yes | Boolean opt-in required for dry-run and apply; default `false` and omission fails. |
+| `--apply` | No | Boolean; default `false`. After all dry-runs pass, runs sequential create-only imports. Requires `--allow-experimental-cms`. |
+| [Common inherited options](#common-inherited-options) | No | `--json`, `--flags-dir`. |
 
 ## Safety and limitations
 
 - Direct Marketing Cloud Next API commands use the verified API `67.0` baseline unless a delegated core command accepts another version.
 - Read-only commands can still write local export, plan, evidence, or result files.
-- Planning and discovery do not authorize mutation. Check the command's documented operations and flags.
-- Core CLI delegation means core `sf` owns the underlying job behavior, errors, and supported metadata or data transport.
+- Planning and discovery do not authorize mutation. Check the command's documented operation-specific requirements.
+- Core CLI delegation means core `sf` owns underlying jobs, errors, and supported metadata or data transport.
 - Segment member IDs are opaque SSOT membership values, not asserted Salesforce CRM record IDs.
 - Identity Resolution support covers configuration and planning, not unified-profile row migration or mutation.
 - Email commands are exact read operations; the plugin does not publish or send email.
 - Data Graph support is metadata GET only; token exchange and graph mutation remain external.
 - CMS support depends on a separately installed compatible provider and remains experimental for local execution.
-- This plugin does not provide complete dependency discovery, automatic reference rewriting, rollback, or end-to-end migration for all Marketing Cloud Next capabilities.
+- The plugin does not provide complete dependency discovery, automatic reference rewriting, rollback, or end-to-end migration for all Marketing Cloud Next capabilities.
 
 ## Development
-
-Use local development only when contributing or testing unreleased commands:
 
 ```bash
 npm install --no-workspaces
@@ -393,7 +424,7 @@ npm test
 sf plugins link .
 ```
 
-Run `sf mcnext --help` and command-level help after linking. Live org tests require explicit private environment variables; never commit org IDs, aliases, keys, tokens, or test data.
+Live-org tests require explicit private environment variables; never commit org IDs, aliases, keys, tokens, or test data.
 
 ## License
 

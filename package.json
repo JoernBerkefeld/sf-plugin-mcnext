@@ -84,6 +84,7 @@
     "test": "wireit",
     "test:nuts": "nyc mocha \"**/*.nut.ts\" --slow 4500 --timeout 600000 --parallel",
     "test:only": "wireit",
+    "test:package-parser": "wireit",
     "test:package": "node scripts/verify-package-lifecycle.mjs",
     "version": "oclif readme"
   },
@@ -150,8 +151,17 @@
       "dependencies": [
         "test:compile",
         "test:only",
+        "test:package-parser",
         "lint"
       ]
+    },
+    "test:package-parser": {
+      "command": "node --test scripts/parse-npm-pack-output.test.mjs",
+      "files": [
+        "scripts/parse-npm-pack-output.mjs",
+        "scripts/parse-npm-pack-output.test.mjs"
+      ],
+      "output": []
     },
     "test:only": {
       "command": "nyc mocha \"test/**/*.test.ts\"",
