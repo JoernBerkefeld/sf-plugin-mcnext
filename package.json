@@ -83,6 +83,7 @@
     "prepare": "husky || true",
     "test": "wireit",
     "test:nuts": "nyc mocha \"**/*.nut.ts\" --slow 4500 --timeout 600000 --parallel",
+    "test:dependency-compat": "wireit",
     "test:only": "wireit",
     "test:package-parser": "wireit",
     "test:package": "node scripts/verify-package-lifecycle.mjs",
@@ -92,8 +93,9 @@
     "access": "public"
   },
   "overrides": {
-    "brace-expansion": "^5.0.9",
-    "minimatch": "^10.0.3",
+    "@typescript-eslint/typescript-estree@6.21.0": {
+      "minimatch": "9.0.9"
+    },
     "serialize-javascript": "^7.0.5",
     "uuid": "^11.1.1"
   },
@@ -150,10 +152,19 @@
     "test": {
       "dependencies": [
         "test:compile",
+        "test:dependency-compat",
         "test:only",
         "test:package-parser",
         "lint"
       ]
+    },
+    "test:dependency-compat": {
+      "command": "node --test scripts/minimatch-compat.test.mjs",
+      "files": [
+        "scripts/minimatch-compat.test.mjs",
+        "package-lock.json"
+      ],
+      "output": []
     },
     "test:package-parser": {
       "command": "node --test scripts/parse-npm-pack-output.test.mjs",
