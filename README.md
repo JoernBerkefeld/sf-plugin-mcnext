@@ -22,7 +22,7 @@ sf plugins install sf-plugin-mcnext
 sf plugins update
 ```
 
-Version `0.6.1` exposes the 15 public commands documented below.
+Version `0.6.2` exposes the 15 public commands documented below.
 
 The separate [`sf-plugin-cms`](https://github.com/JoernBerkefeld/sf-plugin-cms) provider is optional and is needed only for CMS-aware migration planning or experimental CMS execution. Version `0.4.0` is the minimum supported version, but its advertised contract and capabilities must also be compatible.
 
