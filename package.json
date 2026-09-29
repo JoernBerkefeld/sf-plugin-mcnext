@@ -107,15 +107,14 @@
       ]
     },
     "compile": {
-      "command": "tsc -p tsconfig.json --pretty --incremental",
+      "command": "tsc -p tsconfig.json --pretty --incremental false",
       "files": [
         "src/**/*.ts",
         "**/tsconfig.json",
         "messages/**"
       ],
       "output": [
-        "lib/**/*",
-        "tsconfig.tsbuildinfo"
+        "lib/**/*"
       ],
       "clean": "if-file-deleted"
     },
@@ -140,6 +139,21 @@
         "**/tsconfig.json"
       ],
       "output": []
+    },
+    "manifest": {
+      "command": "oclif manifest",
+      "dependencies": [
+        "compile"
+      ],
+      "files": [
+        "lib/**/*",
+        "messages/**",
+        "package.json"
+      ],
+      "output": [
+        "oclif.manifest.json"
+      ],
+      "clean": "if-file-deleted"
     },
     "test:compile": {
       "command": "tsc -p \"./test\" --pretty",
@@ -176,6 +190,9 @@
     },
     "test:only": {
       "command": "nyc mocha \"test/**/*.test.ts\"",
+      "dependencies": [
+        "manifest"
+      ],
       "env": {
         "FORCE_COLOR": "2"
       },
