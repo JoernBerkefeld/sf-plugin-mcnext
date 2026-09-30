@@ -134,7 +134,7 @@ describe('CMS package integrity evidence', () => {
     });
   }
 
-  it('rejects unsuccessful workspaces and unreferenced provider errors', async () => {
+  it('rejects unsuccessful workspaces and applicable provider errors', async () => {
     const setup = await createPackage();
     roots.push(setup.root);
     const envelope = validateCmsExport(setup.fixture);
@@ -151,6 +151,19 @@ describe('CMS package integrity evidence', () => {
     }
     setup.fixture.diagnostics.errors.push({ code: 'EXPORT_ERROR', message: 'No reference field.' });
     await rejects(setup, 'unresolved errors');
+  });
+
+  it('ignores aggregate errors scoped to another workspace', async () => {
+    const setup = await createPackage();
+    roots.push(setup.root);
+    setup.fixture.diagnostics.errors.push({
+      code: 'WORKSPACE_EXPORT_FAILED',
+      message: 'Another workspace was incomplete.',
+      scope: '0ZuOther',
+    });
+    const envelope = validateCmsExport(setup.fixture);
+    const evidence = await validateCmsPackageEvidence(setup.root, envelope, envelope.result!.workspaces[0]);
+    expect(evidence.sourceWorkspaceId).to.equal('0ZuSource');
   });
 
   it('omits filesystem exception paths from missing-root diagnostics', async () => {

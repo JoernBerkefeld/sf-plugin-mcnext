@@ -241,7 +241,7 @@ describe('McnClient', () => {
     ]);
   });
 
-  it('enforces page and item bounds', async () => {
+  it('enforces page bounds and caps emitted items', async () => {
     const pageLimited = await clientReturning([
       { records: [{ Id: 'a' }], nextRecordsUrl: '/services/data/v67.0/query/next' },
     ]);
@@ -249,8 +249,9 @@ describe('McnClient', () => {
     expect(pageError.message).to.contain('exceeded 1 pages');
 
     const itemLimited = await clientReturning([{ records: [{ Id: 'a' }, { Id: 'b' }] }]);
-    const itemError = await captureError(itemLimited.client.requestAll({ path: '/query' }, 200, { maxItems: 1 }));
-    expect(itemError.message).to.contain('exceeded 1 items');
+    expect(await itemLimited.client.requestAll<{ Id: string }>({ path: '/query' }, 200, { maxItems: 1 })).to.deep.equal(
+      [{ Id: 'a' }]
+    );
   });
 
   it('yields pages for incremental export writers', async () => {

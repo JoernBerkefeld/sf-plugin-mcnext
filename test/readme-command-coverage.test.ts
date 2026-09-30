@@ -41,9 +41,17 @@ const constraintExpectations: Record<string, Record<string, ConstraintExpectatio
     'input-file': { required: 'Create/update', expected: ['JSON artifact', 'Forbidden for export'] },
     'journal-file': {
       required: 'Create',
-      expected: ['Required new private identity journal', 'no absolute', 'existing-file overwrite', 'Forbidden for export/update'],
+      expected: [
+        'Required new private identity journal',
+        'no absolute',
+        'existing-file overwrite',
+        'Forbidden for export/update',
+      ],
     },
-    'output-file': { required: 'Export', expected: ['New JSON artifact', 'no overwrite', 'Forbidden for create/update'] },
+    'output-file': {
+      required: 'Export',
+      expected: ['New JSON artifact', 'no overwrite', 'Forbidden for create/update'],
+    },
     'record-id': { required: 'Export/update', expected: ['Forbidden for create'] },
     'target-name': { required: 'Create', expected: ['distinct from source name', 'Forbidden for export/update'] },
   },
@@ -97,12 +105,17 @@ const constraintExpectations: Record<string, Record<string, ConstraintExpectatio
     wait: { expected: ['Integer `1`–`30`'] },
   },
   'mcnext:segment:members:export': {
+    'data-space': { required: 'No', expected: ['default `default`'] },
+    'include-details': { required: 'No', expected: ['default `false`', '19-field'] },
     limit: { expected: ['integer `>= 1`'] },
     'max-duration-ms': { expected: ['integer `>= 1`'] },
     'max-items': { expected: ['integer `>= 1`'] },
     'max-pages': { expected: ['integer `>= 1`'] },
-    offset: { expected: ['integer `>= 0`'] },
-    'output-file': { expected: ['Parent directories are created', 'overwritten', 'written incrementally'] },
+    fields: { expected: ['Basic mode only'] },
+    filters: { expected: ['Basic mode only'] },
+    'order-by': { expected: ['Basic mode only'] },
+    offset: { expected: ['Basic mode only', 'integer `>= 0`'] },
+    'output-file': { expected: ['Parent directories are created', 'normally restored', 'exact sibling backup path'] },
     segment: { expected: ['API/developer name', 'exact display name', '15/18-character `MarketSegment` record ID'] },
   },
   'mcnext:segment:records:export': {
@@ -112,7 +125,8 @@ const constraintExpectations: Record<string, Record<string, ConstraintExpectatio
   },
 };
 
-const readProjectFile = async (path: string): Promise<string> => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+const readProjectFile = async (path: string): Promise<string> =>
+  readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
 const commandHeading = (id: string): string => `## \`sf ${id.replaceAll(':', ' ')}\``;
 
@@ -128,13 +142,19 @@ const bashBlocks = (section: string): string[] =>
   [...section.matchAll(/```bash\n([\s\S]*?)\n```/gu)].map((match) => match[1]);
 
 const optionRows = (section: string): OptionRow[] => {
-  const tableStart = section.indexOf('| Option | Required | Expected/allowed values |');
+  const sectionLines = section.split('\n');
+  const tableStart = sectionLines.findIndex((line) =>
+    /^\| Option\s+\| Required\s+\| Expected\/allowed values\s+\|$/u.test(line)
+  );
   expect(tableStart, 'options table header').to.be.at.least(0);
-  const lines = section.slice(tableStart).split('\n').slice(2);
+  const lines = sectionLines.slice(tableStart + 2);
   const rows: OptionRow[] = [];
   for (const line of lines) {
     if (!line.startsWith('|')) break;
-    const cells = line.split('|').slice(1, -1).map((cell) => cell.trim());
+    const cells = line
+      .split('|')
+      .slice(1, -1)
+      .map((cell) => cell.trim());
     if (cells.length === 3) rows.push({ option: cells[0], required: cells[1], expected: cells[2] });
   }
   return rows;
@@ -150,6 +170,16 @@ const flagRow = (rows: OptionRow[], commandId: string, flag: ManifestFlag): Opti
 };
 
 describe('README public command coverage', () => {
+  it('registers CMS as both a runtime dependency and an oclif plugin', async () => {
+    const packageJson = JSON.parse(await readProjectFile('package.json')) as {
+      dependencies?: Record<string, string>;
+      oclif?: { plugins?: string[] };
+    };
+
+    expect(packageJson.dependencies?.['sf-plugin-cms']).to.be.a('string').and.not.be.empty;
+    expect(packageJson.oclif?.plugins).to.deep.equal(['sf-plugin-cms']);
+  });
+
   it('documents every manifest command with shell-safe examples and exact option rows', async () => {
     const [readme, manifestText] = await Promise.all([
       readProjectFile('README.md'),
@@ -171,7 +201,9 @@ describe('README public command coverage', () => {
         /(?:^|[\s=])<[^>\n]+>/u
       );
       expect(section, `${command.id} options heading`).to.include('### Options');
-      expect(section, `${command.id} common options link`).to.include('[Common inherited options](#common-inherited-options)');
+      expect(section, `${command.id} common options link`).to.include(
+        '[Common inherited options](#common-inherited-options)'
+      );
       const rows = optionRows(section);
 
       for (const flag of Object.values(command.flags)) {
@@ -182,7 +214,10 @@ describe('README public command coverage', () => {
         if (flag.char) {
           expect(codeSpans, `${command.id} exact alias -${flag.char}`).to.include(`-${flag.char}`);
         } else {
-          expect(codeSpans.filter((value) => /^-[^-]/u.test(value)), `${command.id} unexpected short alias`).to.be.empty;
+          expect(
+            codeSpans.filter((value) => /^-[^-]/u.test(value)),
+            `${command.id} unexpected short alias`
+          ).to.be.empty;
         }
         expect(row.required === 'Yes', `${command.id} --${flag.name} requiredness`).to.equal(flag.required === true);
         for (const choice of flag.options ?? []) {
@@ -193,10 +228,14 @@ describe('README public command coverage', () => {
             `default \`${String(flag.default).toLowerCase()}\``
           );
         }
-        if (flag.min !== undefined) expect(row.expected, `${command.id} --${flag.name} minimum`).to.include(String(flag.min));
-        if (flag.max !== undefined) expect(row.expected, `${command.id} --${flag.name} maximum`).to.include(String(flag.max));
-        if (flag.multiple === true) expect(row.expected, `${command.id} --${flag.name} repeatability`).to.include('Repeatable');
-        if (flag.type === 'boolean') expect(row.expected, `${command.id} --${flag.name} boolean type`).to.include('Boolean');
+        if (flag.min !== undefined)
+          expect(row.expected, `${command.id} --${flag.name} minimum`).to.include(String(flag.min));
+        if (flag.max !== undefined)
+          expect(row.expected, `${command.id} --${flag.name} maximum`).to.include(String(flag.max));
+        if (flag.multiple === true)
+          expect(row.expected, `${command.id} --${flag.name} repeatability`).to.include('Repeatable');
+        if (flag.type === 'boolean')
+          expect(row.expected, `${command.id} --${flag.name} boolean type`).to.include('Boolean');
 
         const constraint = constraintExpectations[command.id]?.[flag.name];
         if (constraint?.required) {
@@ -207,6 +246,36 @@ describe('README public command coverage', () => {
         }
       }
     }
+  });
+
+  it('documents the installed CMS oclif dependency and public contract boundary', async () => {
+    const readme = await readProjectFile('README.md');
+
+    expect(readme).to.include('package as an installed oclif plugin dependency');
+    expect(readme).to.include('installs and registers the compatible CMS provider automatically');
+    expect(readme).to.include('do not need a separate `sf plugins install sf-plugin-cms` step');
+    expect(readme).to.include('sf cms --help');
+    expect(readme).to.include('sf cms info --contract-version 1 --json');
+    expect(readme).to.include('public Salesforce CLI boundary');
+    expect(readme).to.include('rather than importing CMS implementation modules');
+    expect(readme).to.include('CMS owns CMS discovery, payload construction, package files');
+    expect(readme).to.include('MCNext owns cross-family selection, routing, policy, orchestration');
+  });
+
+  it('documents the org authentication boundary for enriched segment exports', async () => {
+    const readme = await readProjectFile('README.md');
+    const authenticationStart = readme.indexOf('## Getting started and authentication');
+    const nextSection = readme.indexOf('\n## ', authenticationStart + 3);
+    const authentication = readme.slice(authenticationStart, nextSection === -1 ? undefined : nextSection);
+
+    expect(authenticationStart).to.be.at.least(0);
+    expect(authentication).to.include('Normal Salesforce CLI org authorization covers `segment members export`');
+    expect(authentication).to.include(
+      'you do not need a separate Connected App or authentication stack for `--include-details`'
+    );
+    expect(authentication).to.include(
+      'Only `sf mcnext data-graph metadata` uses an externally obtained Data 360 token'
+    );
   });
 
   it('documents the exact segment identifier contract in its option row', async () => {

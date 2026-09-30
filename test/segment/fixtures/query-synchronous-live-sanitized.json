@@ -1,0 +1,62 @@
+{
+  "data": [
+    [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "individual-placeholder",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      "membership-placeholder",
+      1
+    ]
+  ],
+  "metadata": [
+    { "name": "ssot__BirthDate__c", "type": "TimestampTZ" },
+    { "name": "ssot__CreatedDate__c", "type": "TimestampTZ" },
+    { "name": "ssot__DeathDate__c", "type": "TimestampTZ" },
+    { "name": "ssot__ExternalRecordId__c", "type": "Varchar" },
+    { "name": "ssot__ExternalSourceId__c", "type": "Varchar" },
+    { "name": "ssot__FirstName__c", "type": "Varchar" },
+    { "name": "ssot__GenderId__c", "type": "Varchar" },
+    { "name": "ssot__GenderIdentity__c", "type": "Varchar" },
+    { "name": "ssot__Id__c", "type": "Varchar" },
+    { "name": "ssot__InternalOrganizationId__c", "type": "Varchar" },
+    { "name": "ssot__LastModifiedDate__c", "type": "TimestampTZ" },
+    { "name": "ssot__LastName__c", "type": "Varchar" },
+    { "name": "ssot__PartyId__c", "type": "Varchar" },
+    { "name": "ssot__PersonName__c", "type": "Varchar" },
+    { "name": "ssot__PhotoURL__c", "type": "Varchar" },
+    { "name": "ssot__PrimaryAccountId__c", "type": "Varchar" },
+    { "name": "ssot__Pronoun__c", "type": "Varchar" },
+    { "name": "ssot__Salutation__c", "type": "Varchar" },
+    { "name": "ssot__TitleName__c", "type": "Varchar" },
+    { "name": "membership_key_internal", "type": "Varchar" },
+    { "name": "detail_match_count_internal", "type": "BigInt" }
+  ],
+  "returnedRows": 1,
+  "status": {
+    "chunkCount": 1,
+    "completionStatus": "ResultsProduced",
+    "expirationTime": "",
+    "progress": 1,
+    "queryId": "sanitized-query-id",
+    "rowCount": 1,
+    "rowsProcessed": 649,
+    "stalenessReasons": [],
+    "wallClockTime": 0.035156355
+  }
+}

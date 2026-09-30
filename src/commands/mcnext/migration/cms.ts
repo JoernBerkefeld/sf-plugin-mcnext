@@ -14,6 +14,12 @@ import {
 Messages.importMessagesDirectoryFromMetaUrl(import.meta.url);
 const messages = Messages.loadMessages('sf-plugin-mcnext', 'mcnext.migration.cms');
 
+export const cmsExecutionServices = {
+  buildPlan: buildCmsExecutionPlan,
+  executePlan: executeCmsPlan,
+  writeResult: writeCmsExecutionResult,
+};
+
 export default class MigrationCmsCommand extends SfCommand<CmsExecutionResult> {
   public static readonly summary = messages.getMessage('summary');
   public static readonly description = messages.getMessage('description');
@@ -61,22 +67,31 @@ export default class MigrationCmsCommand extends SfCommand<CmsExecutionResult> {
     if (!cms || cms.state === 'failed') throw new SfError('Migration plan has no usable CMS planning evidence.', 'CmsPlanMissing');
     const packages = new Map(cms.packages.map((item) => [item.sourceWorkspaceId, item]));
     const routes = cms.routes
-      .filter((route) => route.status === 'success' && route.packageManifestSha256 !== undefined)
-      .map((route) => {
+      .filter(
+        (route) =>
+          route.state === 'ready-for-execution' &&
+          route.status === 'success' &&
+          typeof route.targetWorkspaceId === 'string' &&
+          route.targetWorkspaceId.length > 0 &&
+          typeof route.packageManifestSha256 === 'string' &&
+          route.packageManifestSha256.length > 0
+      )
+      .flatMap((route) => {
         const packageEvidence = packages.get(route.sourceWorkspaceId);
-        if (!packageEvidence || packageEvidence.packageManifestSha256 !== route.packageManifestSha256) {
-          throw new SfError(`CMS package binding is missing for ${route.sourceWorkspaceId}.`, 'CmsPackageBindingMismatch');
-        }
-        return {
-          sourceWorkspaceId: route.sourceWorkspaceId,
-          targetWorkspaceId: route.targetWorkspaceId,
-          sourceDirectory: resolve(packageEvidence.artifactPath),
-        };
+        if (!packageEvidence || packageEvidence.packageManifestSha256 !== route.packageManifestSha256) return [];
+        return [
+          {
+            sourceWorkspaceId: route.sourceWorkspaceId,
+            targetWorkspaceId: route.targetWorkspaceId,
+            sourceDirectory: resolve(packageEvidence.artifactPath),
+            packageManifestSha256: route.packageManifestSha256,
+          },
+        ];
       });
-    if (routes.length === 0 || routes.length !== cms.routes.length) {
-      throw new SfError('Every selected CMS route must have successful export and package evidence.', 'CmsRouteNotExecutable');
+    if (routes.length === 0) {
+      throw new SfError('Migration plan has no executable CMS routes.', 'CmsRouteNotExecutable');
     }
-    const executionPlan = await buildCmsExecutionPlan({
+    const executionPlan = await cmsExecutionServices.buildPlan({
       sourcePlanFile,
       sourcePlanSha256: createHash('sha256').update(sourcePlanBytes).digest('hex'),
       targetOrg: flags['target-org'],
@@ -85,13 +100,13 @@ export default class MigrationCmsCommand extends SfCommand<CmsExecutionResult> {
       routes,
       reportRoot: resolve(flags['report-root']),
     });
-    const result = await executeCmsPlan({
+    const result = await cmsExecutionServices.executePlan({
       plan: executionPlan,
       targetOrg: target,
       apply: flags.apply,
       allowExperimental: flags['allow-experimental-cms'],
     });
-    await writeCmsExecutionResult(resolve(flags['result-file']), result);
+    await cmsExecutionServices.writeResult(resolve(flags['result-file']), result);
     return result;
   }
 }

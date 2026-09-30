@@ -20,6 +20,15 @@ function rejects(action: () => unknown, detail: string): void {
 }
 
 describe('CMS public contract boundary', () => {
+  it('accepts forward-compatible compatibility advertisements independent of provider semver', () => {
+    const validated = validateCmsInfo(validInfoFixture);
+
+    expect(validated.envelope.result!.plugin.version).to.equal('9.8.7');
+    expect(validated.envelope.result!.contracts.compatibility['workspaceImport@2']).to.deep.equal({
+      workspaceExportManifestMajors: [2],
+    });
+  });
+
   it('accepts contract-transcribed info with implemented and experimental capabilities', () => {
     expect(fixtureProvenance.info).to.equal('contract-transcribed');
     const validated = validateCmsInfo(validInfoFixture);
@@ -38,21 +47,21 @@ describe('CMS public contract boundary', () => {
       command: 'sf cms info --contract-version 1 --json',
     });
     expect(publishedInfoFixture.provenance).not.to.have.property('exportSetId');
-    rejects(() => validateCmsInfo(publishedInfoFixture), 'CMS plugin must be at least 0.4.0');
+    rejects(() => validateCmsInfo(publishedInfoFixture), 'capability contract workspace.export.bulk');
   });
 
   it('keeps retained contract validation authoritative for later plugin versions', () => {
     const later = cloneFixture(validInfoFixture);
-    later.metadata.plugin.version = '0.4.1';
-    later.provenance.pluginVersion = '0.4.1';
-    later.result!.plugin.version = '0.4.1';
+    later.metadata.plugin.version = '10.0.0';
+    later.provenance.pluginVersion = '10.0.0';
+    later.result!.plugin.version = '10.0.0';
     expect(() => validateCmsInfo(later)).to.not.throw();
 
     later.result!.contracts.commandResults.workspaceExportSet = ['2.0.0'];
     rejects(() => validateCmsInfo(later), 'export result major is unsupported');
   });
 
-  it('blocks malformed, unknown, unavailable, old, and version-drift info', () => {
+  it('blocks malformed, unknown, unavailable, and contract-major drift info', () => {
     const unknownField = cloneFixture(validInfoFixture) as unknown as Record<string, unknown>;
     unknownField.extra = true;
     rejects(() => validateCmsInfo(unknownField), 'envelope fields');
@@ -66,12 +75,6 @@ describe('CMS public contract boundary', () => {
     const unavailable = cloneFixture(validInfoFixture);
     unavailable.result!.capabilities[1].state = 'unavailable';
     rejects(() => validateCmsInfo(unavailable), 'capability unavailable');
-
-    const tooOld = cloneFixture(validInfoFixture);
-    tooOld.metadata.plugin.version = '0.2.9';
-    tooOld.provenance.pluginVersion = '0.2.9';
-    tooOld.result!.plugin.version = '0.2.9';
-    rejects(() => validateCmsInfo(tooOld), 'must be at least');
 
     const drift = cloneFixture(validInfoFixture);
     drift.contractVersion = '2.0.0';
@@ -183,7 +186,7 @@ describe('CMS public contract boundary', () => {
     rejects(() => validateCmsExport(wrongProducer), 'producer must be sf-plugin-cms');
 
     const wrongVersion = cloneFixture(validExportFixture);
-    wrongVersion.provenance.pluginVersion = '0.3.2';
+    wrongVersion.provenance.pluginVersion = '1.2.3';
     rejects(() => validateCmsExport(wrongVersion), 'envelope provenance binding');
   });
 

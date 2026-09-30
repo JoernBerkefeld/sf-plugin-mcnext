@@ -1,0 +1,101 @@
+{
+  "metadata": [
+    {
+      "name": "Membership_Selected__dlm",
+      "fields": [
+        {
+          "name": "Id__c",
+          "keyQualifier": "KQ_FROM"
+        }
+      ],
+      "primaryKeys": [
+        {
+          "name": "Id__c",
+          "displayName": "Membership identifier",
+          "indexOrder": "1"
+        }
+      ],
+      "relationships": [
+        {
+          "fromEntity": "Membership_Selected__dlm",
+          "toEntity": "UnifiedssotIndividualMkt__dlm",
+          "fromEntityAttribute": "Id__c",
+          "toEntityAttribute": "ssot__Id__c",
+          "cardinality": "NTOONE"
+        }
+      ]
+    },
+    {
+      "name": "UnifiedssotIndividualMkt__dlm",
+      "fields": [
+        {
+          "name": "ssot__Id__c",
+          "displayName": "Detail 0",
+          "type": "Text"
+        },
+        {
+          "name": "DetailField01__c"
+        },
+        {
+          "name": "DetailField02__c"
+        },
+        {
+          "name": "DetailField03__c"
+        },
+        {
+          "name": "DetailField04__c"
+        },
+        {
+          "name": "DetailField05__c"
+        },
+        {
+          "name": "DetailField06__c"
+        },
+        {
+          "name": "DetailField07__c"
+        },
+        {
+          "name": "DetailField08__c"
+        },
+        {
+          "name": "DetailField09__c"
+        },
+        {
+          "name": "DetailField10__c"
+        },
+        {
+          "name": "DetailField11__c"
+        },
+        {
+          "name": "DetailField12__c"
+        },
+        {
+          "name": "DetailField13__c"
+        },
+        {
+          "name": "DetailField14__c"
+        },
+        {
+          "name": "DetailField15__c"
+        },
+        {
+          "name": "DetailField16__c"
+        },
+        {
+          "name": "DetailField17__c"
+        },
+        {
+          "name": "DetailField18__c"
+        }
+      ],
+      "primaryKeys": [
+        {
+          "name": "ssot__Id__c",
+          "displayName": "Unified individual identifier",
+          "indexOrder": "1"
+        }
+      ],
+      "relationships": []
+    }
+  ]
+}

@@ -109,6 +109,22 @@ try {
 
   const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
   assert.equal(packageJson.exports, './lib/index.js', 'package export must point to the compiled entry point');
+  const cmsDependencyRange = packageJson.dependencies?.['sf-plugin-cms'];
+  assert.equal(typeof cmsDependencyRange, 'string', 'CMS provider must remain a runtime dependency');
+  assert.deepEqual(packageJson.oclif?.plugins, ['sf-plugin-cms'], 'CMS provider must remain registered as an oclif plugin');
+
+  const packedPackageJsonText = execFileSync('tar', ['-xOf', tarball, 'package/package.json'], { encoding: 'utf8' });
+  const packedPackageJson = JSON.parse(packedPackageJsonText);
+  assert.equal(
+    packedPackageJson.dependencies?.['sf-plugin-cms'],
+    cmsDependencyRange,
+    'packed CMS provider dependency does not match package metadata'
+  );
+  assert.deepEqual(
+    packedPackageJson.oclif?.plugins,
+    ['sf-plugin-cms'],
+    'packed CMS provider oclif registration does not match the release contract'
+  );
   process.stdout.write(`Verified ${basename(tarball)} (${entries.length} files, ${commandIds.length} commands).\n`);
 } finally {
   await removeRunOwnedPath(cleanupRun, workDir);

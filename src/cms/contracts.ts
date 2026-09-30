@@ -1,5 +1,4 @@
 export const CMS_PLUGIN_NAME = 'sf-plugin-cms' as const;
-export const CMS_MINIMUM_PLUGIN_VERSION = '0.4.0' as const;
 export const CMS_INFO_CONTRACT = 'sf-cms-info' as const;
 export const CMS_EXPORT_CONTRACT = 'sf-cms-workspace-export-set' as const;
 export const CMS_CORRELATION_CONTRACT = 'sf-cms-external-reference-correlations@1' as const;
@@ -52,7 +51,7 @@ export type CmsInfoResult = {
     commandResults: { info: string[]; workspaceExportSet: string[]; workspaceImport: string[] };
     packageManifests: { workspaceExport: string[] };
     embeddedResults: { externalReferenceCorrelations: [typeof CMS_CORRELATION_CONTRACT] };
-    compatibility: {
+    compatibility: Record<string, { workspaceExportManifestMajors: number[] }> & {
       'workspaceExportSet@1': { workspaceExportManifestMajors: number[] };
       'workspaceImport@1': { workspaceExportManifestMajors: number[] };
     };
@@ -145,9 +144,6 @@ export function validateCmsInfo(value: unknown): {
   const envelope = validateEnvelope(value, 'cms.info', CMS_INFO_CONTRACT, validateInfoResult);
   if (envelope.provenance.command !== CMS_INFO_COMMAND) throw contractError('info command provenance');
   if (envelope.status !== 'success' || envelope.result === null) throw contractError('CMS info must be successful');
-  if (!isAtLeastVersion(envelope.result.plugin.version, CMS_MINIMUM_PLUGIN_VERSION)) {
-    throw contractError(`CMS plugin must be at least ${CMS_MINIMUM_PLUGIN_VERSION}`);
-  }
   if (envelope.metadata.plugin.version !== envelope.result.plugin.version)
     throw contractError('plugin version binding');
   requireMajor(envelope.result.contracts.commandResults.info, 1, 'info result');
@@ -323,13 +319,17 @@ function validateInfoResult(value: unknown): CmsInfoResult {
     ['externalReferenceCorrelations'],
     'embedded results'
   );
-  const compatibility = strictRecord(
+  const compatibility = extensibleRecord(
     contracts.compatibility,
     ['workspaceExportSet@1', 'workspaceImport@1'],
     'compatibility'
   );
-  const exportCompatibility = validateManifestCompatibility(compatibility['workspaceExportSet@1']);
-  const importCompatibility = validateManifestCompatibility(compatibility['workspaceImport@1']);
+  const validatedCompatibility = Object.fromEntries(
+    Object.entries(compatibility).map(([name, advertised]) => [name, validateManifestCompatibility(advertised)])
+  );
+  const exportCompatibility = validatedCompatibility['workspaceExportSet@1'];
+  const importCompatibility = validatedCompatibility['workspaceImport@1'];
+  if (exportCompatibility === undefined || importCompatibility === undefined) throw contractError('compatibility fields');
   const correlations = stringArray(embeddedResults.externalReferenceCorrelations, 'correlation contracts');
   if (correlations.length !== 1 || correlations[0] !== CMS_CORRELATION_CONTRACT)
     throw contractError('correlation contract');
@@ -347,7 +347,11 @@ function validateInfoResult(value: unknown): CmsInfoResult {
       },
       packageManifests: { workspaceExport: stringArray(packageManifests.workspaceExport, 'manifest versions') },
       embeddedResults: { externalReferenceCorrelations: [CMS_CORRELATION_CONTRACT] },
-      compatibility: { 'workspaceExportSet@1': exportCompatibility, 'workspaceImport@1': importCompatibility },
+      compatibility: {
+        ...validatedCompatibility,
+        'workspaceExportSet@1': exportCompatibility,
+        'workspaceImport@1': importCompatibility,
+      },
     },
     capabilities: array(record.capabilities, 'capabilities').map(validateCapability),
   };
@@ -647,6 +651,14 @@ function strictRecord(
   return record;
 }
 
+function extensibleRecord(value: unknown, requiredKeys: string[], label: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value))
+    throw contractError(`${label} must be an object`);
+  const record = value as Record<string, unknown>;
+  if (requiredKeys.some((key) => !Object.hasOwn(record, key))) throw contractError(`${label} fields`);
+  return record;
+}
+
 function array(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) throw contractError(`${label} must be an array`);
   return value;
@@ -717,17 +729,6 @@ function requireUniqueCanonicalOrder(values: string[], label: string): void {
 
 function requireUnique(values: string[], label: string): void {
   if (new Set(values).size !== values.length) throw contractError(`duplicate ${label}`);
-}
-
-function isAtLeastVersion(actual: string, minimum: string): boolean {
-  const left = version(actual, 'plugin version').split('.').map(Number);
-  const right = minimum.split('.').map(Number);
-  return (
-    left.some(
-      (part, index) =>
-        part > right[index] && left.slice(0, index).every((prior, priorIndex) => prior === right[priorIndex])
-    ) || left.every((part, index) => part === right[index])
-  );
 }
 
 function sha256(value: unknown, label: string): string {

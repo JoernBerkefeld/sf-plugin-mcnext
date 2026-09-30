@@ -322,16 +322,22 @@ function bindManifest(
 
 function assertNoUnresolvedDiagnostics(envelope: CmsEnvelope<CmsExportResult>, workspace: CmsExportWorkspace): void {
   if (workspace.status !== 'success') throw integrityError('workspace export is not successful');
-  const diagnostics = [
-    ...envelope.diagnostics.warnings,
-    ...envelope.diagnostics.errors,
+  const aggregateWarnings = envelope.diagnostics.warnings.filter(
+    (diagnostic) => diagnostic.scope === undefined || diagnostic.scope === workspace.source.sourceId
+  );
+  const aggregateErrors = envelope.diagnostics.errors.filter(
+    (diagnostic) => diagnostic.scope === undefined || diagnostic.scope === workspace.source.sourceId
+  );
+  const routeDiagnostics = [
+    ...aggregateWarnings,
+    ...aggregateErrors,
     ...workspace.diagnostics.warnings,
     ...workspace.diagnostics.errors,
   ];
-  if (diagnostics.some((diagnostic) => diagnostic.reference !== undefined)) {
+  if (routeDiagnostics.some((diagnostic) => diagnostic.reference !== undefined)) {
     throw integrityError('unresolved correlation evidence is diagnosed');
   }
-  if (envelope.diagnostics.errors.length > 0 || workspace.diagnostics.errors.length > 0) {
+  if (aggregateErrors.length > 0 || workspace.diagnostics.errors.length > 0) {
     throw integrityError('export reports unresolved errors');
   }
 }

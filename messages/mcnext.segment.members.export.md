@@ -4,17 +4,21 @@ Export computed members of a Marketing Cloud Next segment.
 
 # description
 
-Resolves a segment by API name, MarketSegment record ID, or exact display name, then exports its computed members through the verified v67 SSOT members endpoint.
+Resolves a segment by API name, MarketSegment record ID, or exact display name, then exports its computed members. Basic mode preserves the verified v67 SSOT members endpoint shape. With `--include-details`, the command discovers the segment's latest membership DMO and segment-on DMO, queries Data 360, and writes exactly the 19 Unified Individual fields in service metadata order, one row per membership.
 
-Rows are written incrementally as CSV or JSON. The API member `id` is preserved bytes-for-value and is Watson/SSOT membership data, not a claimed Salesforce CRM record ID. If a paging safety limit or request error stops the operation, the command reports that the partially written file is incomplete.
+CSV and JSON outputs are staged beside the destination and replace it only after discovery, querying, paging, formatting, closing, commit, and backup cleanup all succeed. Existing destination bytes are normally restored on failure. If restoration is impossible, the error states the destination status and exact sibling backup path retaining the original. `--fields`, `--filters`, `--order-by`, and nonzero `--offset` are basic-only and are rejected with `--include-details`.
 
 # examples
 
-- Export members by segment API name as CSV:
+- Export basic members by segment API name as CSV:
 
   <%= config.bin %> <%= command.id %> --target-org my-org --segment My_Published_Segment --output-file members.csv
 
-- Select a segment by MarketSegment ID and export JSON with verified request options:
+- Export 19-field Unified Individual details as JSON from a named data space:
+
+  <%= config.bin %> <%= command.id %> --target-org my-org --segment My_Published_Segment --output-file member-details.json --result-format json --include-details --data-space Marketing
+
+- Select a segment by MarketSegment ID and export basic JSON with verified request options:
 
   <%= config.bin %> <%= command.id %> --target-org my-org --segment 1sg000000000001 --output-file members.json --result-format json --fields Id**c,Delta_Type**c --filters "Delta_Type**c in ('new')" --order-by "Id**c asc" --limit 100
 
@@ -28,43 +32,51 @@ Segment API name, MarketSegment record ID, or exact segment display name.
 
 # flags.output-file.summary
 
-Destination file for exported member rows.
+Destination file for exported member rows. Existing bytes are normally restored on failure; exceptional restoration failure reports the exact retained backup path.
 
 # flags.result-format.summary
 
 Write member rows as CSV or JSON.
 
+# flags.include-details.summary
+
+Query Data 360 and export the details-only 19-field Unified Individual contract. Default: false.
+
+# flags.data-space.summary
+
+Data 360 data space used by enriched metadata and Query API requests. Default: default.
+
 # flags.fields.summary
 
-Comma-separated SSOT storage fields requested from the members endpoint.
+Comma-separated SSOT storage fields requested from the basic members endpoint.
 
 # flags.filters.summary
 
-Filter expression passed to the members endpoint.
+Filter expression passed to the basic members endpoint.
 
 # flags.order-by.summary
 
-Ordering expression passed to the members endpoint.
+Ordering expression passed to the basic members endpoint.
 
 # flags.limit.summary
 
-Number of member rows requested per page.
+Basic mode page size; enriched mode Query API row page size.
 
 # flags.offset.summary
 
-Zero-based member offset for the first page.
+Zero-based member offset for the first basic-mode page.
 
 # flags.max-pages.summary
 
-Maximum number of pages written before stopping with an incomplete-export error.
+Maximum number of pages staged before failing, before destination replacement begins.
 
 # flags.max-items.summary
 
-Maximum number of rows written before stopping with an incomplete-export error.
+Maximum number of rows staged before failing, before destination replacement begins.
 
 # flags.max-duration-ms.summary
 
-Maximum paging duration in milliseconds before stopping with an incomplete-export error.
+Maximum paging duration in milliseconds before failing, before destination replacement begins.
 
 # flags.column-delimiter.summary
 

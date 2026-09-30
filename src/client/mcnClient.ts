@@ -9,6 +9,7 @@ export type RequestOptions = {
   path: string;
   method?: HttpMethod;
   body?: unknown;
+  headers?: Record<string, string>;
   query?: Record<string, string | number | boolean | undefined>;
   itemsKey?: string;
   pageSizeParam?: string;
@@ -56,12 +57,6 @@ function assertWithinLimits(state: PaginationState, limits: Required<PaginationL
   }
 }
 
-function assertItemLimit(itemCount: number, maxItems: number): void {
-  if (itemCount > maxItems) {
-    throw new SfError(`Pagination exceeded ${maxItems} items.`, 'PaginationItemLimitError');
-  }
-}
-
 function assertNonnegativeInteger(value: unknown, label: string): asserts value is number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     throw new SfError(`Pagination ${label} must be a finite nonnegative integer.`, 'PaginationEnvelopeError');
@@ -91,7 +86,10 @@ function validateCompletePage(
     throw new SfError('Pagination page exceeds the declared total count.', 'PaginationEnvelopeError');
   }
   if (pageOffset + itemCount < totalItems && itemCount !== servedPageSize) {
-    throw new SfError('Pagination returned a premature short page before the declared total.', 'PaginationEnvelopeError');
+    throw new SfError(
+      'Pagination returned a premature short page before the declared total.',
+      'PaginationEnvelopeError'
+    );
   }
 }
 
@@ -183,7 +181,7 @@ export class McnClient {
         method: options.method ?? 'GET',
         url,
         ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...options.headers },
       });
     } catch (error) {
       throw McnClient.toSfError(error, options.method ?? 'GET', url);
@@ -210,10 +208,11 @@ export class McnClient {
       const page = await this.fetchPage(options, requestedPageSize, state);
       /* eslint-enable no-await-in-loop */
       const batch = McnClient.extractBatch<T>(page, options.itemsKey, options.requireItemsKey);
-      const emitted = state.emitted + batch.length;
-      assertItemLimit(emitted, effective.maxItems);
-      state = { ...state, emitted, pageCount: state.pageCount + 1 };
-      yield batch;
+      const remaining = effective.maxItems - state.emitted;
+      const emittedBatch = batch.slice(0, Math.max(0, remaining));
+      state = { ...state, emitted: state.emitted + emittedBatch.length, pageCount: state.pageCount + 1 };
+      yield emittedBatch;
+      if (state.emitted >= effective.maxItems) return;
 
       const offset = getNextOffset(
         page,

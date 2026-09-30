@@ -128,7 +128,7 @@ describe('mcnext migration plan', () => {
     expect(exportCms.called).to.equal(false);
   });
 
-  it('keeps successful experimental CMS evidence ownership-uncertain without mutation', async () => {
+  it('marks successful validated CMS evidence ready without mutation', async () => {
     const workspaceMap = join(directory, 'map.json');
     const evidenceFile = join(directory, 'cms-evidence.json');
     const exportDirectory = join(directory, 'export');
@@ -200,12 +200,12 @@ describe('mcnext migration plan', () => {
     };
     expect(exportStub.calledOnceWithExactly('source', exportDirectory)).to.equal(true);
     expect(result.cmsPlanning).to.deep.equal({
-      state: 'ownership-uncertain',
+      state: 'ready-for-execution',
       experimental: true,
-      readyRoutes: 0,
-      blockedRoutes: 1,
+      readyRoutes: 1,
+      blockedRoutes: 0,
     });
-    expect(plan.cmsPlanning).to.include({ state: 'ownership-uncertain', experimental: true });
+    expect(plan.cmsPlanning).to.include({ state: 'ready-for-execution', experimental: true });
     expect(plan.cmsPlanning.correlations[0].sourceReference).to.equal(' OPAQUE:Case-Sensitive/Value== ');
     expect(plan.executableTargetPayloads).to.deep.equal([]);
     expect(plan.cmsPlanning.executablePayloads).to.deep.equal([]);
@@ -213,12 +213,12 @@ describe('mcnext migration plan', () => {
     expect(plan.cmsPlanning.rewrites).to.deep.equal([]);
     expect(plan.cmsPlanning.mutations).to.deep.equal([]);
     expect(ux.log.args.flat().join(' '))
-      .to.include('ownership-uncertain (experimental)')
-      .and.to.include('ready routes: 0');
-    expect(ux.warn.args.flat().join(' ')).to.include('CMS-dependent planning is not ready');
+      .to.include('ready-for-execution (experimental)')
+      .and.to.include('ready routes: 1');
+    expect(ux.warn.called).to.equal(false);
   });
 
-  it('reports ownership uncertainty instead of readiness without a known dependent edge', async () => {
+  it('marks a successful route ready when package and target bindings are valid', async () => {
     const workspaceMap = join(directory, 'ownership-map.json');
     const output = join(directory, 'ownership.json');
     await writeFile(workspaceMap, '{"version":1,"workspaces":{"0ZuSource":"0ZuTarget"}}', 'utf8');
@@ -258,62 +258,171 @@ describe('mcnext migration plan', () => {
       join(directory, 'ownership-export'),
     ]);
     expect(result.cmsPlanning).to.deep.equal({
-      state: 'ownership-uncertain',
+      state: 'ready-for-execution',
       experimental: true,
-      readyRoutes: 0,
-      blockedRoutes: 1,
+      readyRoutes: 1,
+      blockedRoutes: 0,
     });
   });
 
-  for (const level of ['workspace', 'aggregate'] as const) {
-    for (const status of ['partial', 'failed', 'blocked'] as const) {
-      it(`does not collapse ${level} ${status} export into ownership uncertainty`, async () => {
-        const workspaceMap = join(directory, 'map.json');
-        const output = join(directory, 'plan.json');
-        await writeFile(workspaceMap, '{"version":1,"workspaces":{"0ZuSource":"0ZuTarget"}}');
-        const exported = cloneFixture(validExportFixture);
-        exported.provenance.sourceOrgId = '00Dsource';
-        if (level === 'workspace') exported.result!.workspaces[0].status = status;
-        else exported.status = status;
-        $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
-          envelope: cloneFixture(validInfoFixture),
-          capabilities: {
+  it('blocks an all-partial export with zero ready routes', async () => {
+    const workspaceMap = join(directory, 'all-partial-map.json');
+    await writeFile(workspaceMap, '{"version":1,"workspaces":{"0ZuSource":"0ZuTarget"}}');
+    const exported = cloneFixture(validExportFixture);
+    exported.provenance.sourceOrgId = '00Dsource';
+    exported.status = 'partial';
+    exported.result!.workspaces[0].status = 'partial';
+    $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
+      envelope: cloneFixture(validInfoFixture),
+      capabilities: {
         bulkExport: 'implemented',
         externalReferenceCorrelation: 'experimental',
         workspaceImport: 'experimental',
         experimental: true,
       },
-        });
-        $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
-        const validate = $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage').resolves({
-          sourceWorkspaceId: '0ZuSource',
-          artifactPath: 'a',
-          manifestPath: 'a/manifest.json',
-          packageManifestSha256: exported.result!.workspaces[0].artifact.manifestSha256,
-          sourceOrgId: '00Dsource',
-          pluginVersion: '0.4.0',
-          exportSetId: exported.provenance.exportSetId!,
-          correlations: [],
-        });
-        const result = await MigrationPlanCommand.run([
-          '--source-org',
-          'source',
-          '--target-org',
-          'target',
-          '--output-file',
-          output,
-          '--cms-plan',
-          '--cms-workspace-map',
-          workspaceMap,
-          '--cms-export-dir',
-          join(directory, 'export'),
-        ]);
-        expect(result.cmsPlanning!.state).to.equal('blocked');
-        if (level === 'workspace') expect(validate.called).to.equal(false);
-        expect(ux.log.args.flat().join(' ')).to.include('blocked (experimental)');
+    });
+    $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
+    const validate = $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage');
+    const result = await MigrationPlanCommand.run([
+      '--source-org',
+      'source',
+      '--target-org',
+      'target',
+      '--output-file',
+      join(directory, 'all-partial-plan.json'),
+      '--cms-plan',
+      '--cms-workspace-map',
+      workspaceMap,
+      '--cms-export-dir',
+      join(directory, 'all-partial-export'),
+    ]);
+    expect(result.cmsPlanning).to.deep.equal({
+      state: 'blocked',
+      experimental: true,
+      readyRoutes: 0,
+      blockedRoutes: 1,
+    });
+    expect(validate.called).to.equal(false);
+  });
+
+  for (const status of ['partial', 'failed', 'blocked'] as const) {
+    it(`blocks an incomplete ${status} workspace route`, async () => {
+      const workspaceMap = join(directory, 'map.json');
+      const output = join(directory, 'plan.json');
+      await writeFile(workspaceMap, '{"version":1,"workspaces":{"0ZuSource":"0ZuTarget"}}');
+      const exported = cloneFixture(validExportFixture);
+      exported.provenance.sourceOrgId = '00Dsource';
+      exported.result!.workspaces[0].status = status;
+      $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
+        envelope: cloneFixture(validInfoFixture),
+        capabilities: {
+          bulkExport: 'implemented',
+          externalReferenceCorrelation: 'experimental',
+          workspaceImport: 'experimental',
+          experimental: true,
+        },
       });
-    }
+      $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
+      const validate = $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage');
+      const result = await MigrationPlanCommand.run([
+        '--source-org',
+        'source',
+        '--target-org',
+        'target',
+        '--output-file',
+        output,
+        '--cms-plan',
+        '--cms-workspace-map',
+        workspaceMap,
+        '--cms-export-dir',
+        join(directory, 'export'),
+      ]);
+      expect(result.cmsPlanning!.state).to.equal('blocked');
+      expect(validate.called).to.equal(false);
+      expect(ux.log.args.flat().join(' ')).to.include('blocked (experimental)');
+    });
   }
+
+  it('keeps the successful route executable in a mixed success and partial export', async () => {
+    const workspaceMap = join(directory, 'map.json');
+    const output = join(directory, 'plan.json');
+    await writeFile(
+      workspaceMap,
+      '{"version":1,"workspaces":{"0ZuSource":"0ZuTarget","0ZuPartial":"0ZuPartialTarget"}}'
+    );
+    const exported = cloneFixture(validExportFixture);
+    exported.provenance.sourceOrgId = '00Dsource';
+    exported.status = 'partial';
+    exported.result!.workspaces.push({
+      ...cloneFixture(exported.result!.workspaces[0]),
+      source: { ...exported.result!.workspaces[0].source, sourceId: '0ZuPartial', name: 'Partial Workspace' },
+      status: 'partial',
+      artifact: {
+        ...exported.result!.workspaces[0].artifact,
+        path: 'Partial Workspace',
+        manifestPath: 'Partial Workspace/manifest.json',
+      },
+    });
+    exported.diagnostics.errors.push({
+      code: 'WORKSPACE_EXPORT_FAILED',
+      message: 'Another workspace was incomplete.',
+      scope: '0ZuPartial',
+    });
+    $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
+      envelope: cloneFixture(validInfoFixture),
+      capabilities: {
+        bulkExport: 'implemented',
+        externalReferenceCorrelation: 'experimental',
+        workspaceImport: 'experimental',
+        experimental: true,
+      },
+    });
+    $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
+    $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage').resolves({
+      sourceWorkspaceId: '0ZuSource',
+      artifactPath: 'a',
+      manifestPath: 'a/manifest.json',
+      packageManifestSha256: exported.result!.workspaces[0].artifact.manifestSha256,
+      sourceOrgId: '00Dsource',
+      pluginVersion: '0.4.0',
+      exportSetId: exported.provenance.exportSetId!,
+      correlations: [],
+    });
+    const result = await MigrationPlanCommand.run([
+      '--source-org',
+      'source',
+      '--target-org',
+      'target',
+      '--output-file',
+      output,
+      '--cms-plan',
+      '--cms-workspace-map',
+      workspaceMap,
+      '--cms-export-dir',
+      join(directory, 'export'),
+    ]);
+    expect(result.cmsPlanning).to.deep.equal({
+      state: 'partial',
+      experimental: true,
+      readyRoutes: 1,
+      blockedRoutes: 1,
+    });
+    const plan = JSON.parse(await readFile(output, 'utf8')) as {
+      cmsPlanning: {
+        diagnostics: Array<{ code: string }>;
+        routes: Array<{ sourceWorkspaceId: string; state: string }>;
+      };
+    };
+    expect(plan.cmsPlanning.routes.find((route) => route.sourceWorkspaceId === '0ZuSource')!.state).to.equal(
+      'ready-for-execution'
+    );
+    expect(plan.cmsPlanning.routes.find((route) => route.sourceWorkspaceId === '0ZuPartial')!.state).to.equal('blocked');
+    expect(plan.cmsPlanning.diagnostics).to.deep.include({
+      code: 'WORKSPACE_EXPORT_FAILED',
+      message: 'Another workspace was incomplete.',
+      scope: '0ZuPartial',
+    });
+  });
 
   for (const scenario of ['valid', 'invalid', 'missing-route'] as const) {
     it(`sanitizes every persisted diagnostic field for ${scenario} packages`, async () => {
@@ -442,10 +551,10 @@ describe('mcnext migration plan', () => {
       join(directory, 'export'),
     ]);
     expect(result.cmsPlanning).to.deep.equal({
-      state: 'blocked',
+      state: 'partial',
       experimental: true,
-      readyRoutes: 0,
-      blockedRoutes: 2,
+      readyRoutes: 1,
+      blockedRoutes: 1,
     });
     const plan = JSON.parse(await readFile(output, 'utf8')) as {
       cmsPlanning: {

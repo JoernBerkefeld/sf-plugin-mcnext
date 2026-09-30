@@ -38,7 +38,12 @@ export type CmsExecutionResult = {
   stoppedAt?: string;
 };
 
-type RouteInput = { sourceWorkspaceId: string; targetWorkspaceId: string; sourceDirectory: string };
+type RouteInput = {
+  sourceWorkspaceId: string;
+  targetWorkspaceId: string;
+  sourceDirectory: string;
+  packageManifestSha256: string;
+};
 
 export async function buildCmsExecutionPlan(input: {
   sourcePlanFile: string;
@@ -51,18 +56,15 @@ export async function buildCmsExecutionPlan(input: {
   cli?: CmsCliOptions;
 }): Promise<CmsExecutionPlan> {
   assertSalesforceId(input.targetOrgId, 'target org ID');
-  const info = await runCmsInfo(input.cli);
-  if (info.capabilities.workspaceImport !== 'experimental') {
-    throw new Error('CMS workspace import capability must be explicitly experimental');
-  }
   const routes = [];
   for (const route of [...input.routes].sort((left, right) => left.sourceWorkspaceId.localeCompare(right.sourceWorkspaceId))) {
     assertSalesforceId(route.sourceWorkspaceId, 'source workspace ID');
     assertSalesforceId(route.targetWorkspaceId, 'target workspace ID');
     // eslint-disable-next-line no-await-in-loop -- canonical route binding is intentionally serialized
     const sourceDirectory = await canonicalDirectory(route.sourceDirectory);
-    // eslint-disable-next-line no-await-in-loop -- manifest binding is captured beside its canonical route
+    // eslint-disable-next-line no-await-in-loop -- planned package identity must match disk before provider discovery
     const manifestSha256 = sha256(await readFile(join(sourceDirectory, 'manifest.json')));
+    if (manifestSha256 !== route.packageManifestSha256) throw new Error('CMS manifest binding changed');
     const reportDirectory = join(resolve(input.reportRoot), route.sourceWorkspaceId);
     routes.push({
       ...route,
@@ -79,6 +81,10 @@ export async function buildCmsExecutionPlan(input: {
   }
   const sourcePlanFile = await canonicalFile(input.sourcePlanFile);
   if (sha256(await readFile(sourcePlanFile)) !== input.sourcePlanSha256) throw new Error('source migration plan changed');
+  const info = await runCmsInfo(input.cli);
+  if (info.capabilities.workspaceImport !== 'experimental') {
+    throw new Error('CMS workspace import capability must be explicitly experimental');
+  }
   const unsigned = {
     contract: 'sf-mcnext-cms-execution-plan' as const,
     contractVersion: '1.0.0' as const,

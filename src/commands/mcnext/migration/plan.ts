@@ -213,16 +213,9 @@ async function planCmsMigration(flags: MigrationPlanFlags, source: Org): Promise
           targetWorkspaceId,
           packageManifestSha256: evidence.packageManifestSha256,
           status: workspace.status,
-          state: 'ownership-uncertain',
+          state: 'ready-for-execution',
           experimental: info.capabilities.experimental,
-          diagnostics: [
-            ...workspace.diagnostics.warnings,
-            ...workspace.diagnostics.errors,
-            diagnostic(
-              'CMS_OWNERSHIP_UNCERTAIN',
-              'No independently evidenced workspace, owner, and field-bound MCN dependency source is known.'
-            ),
-          ],
+          diagnostics: [...workspace.diagnostics.warnings, ...workspace.diagnostics.errors],
         });
       } catch (error) {
         routes.push(
@@ -238,19 +231,15 @@ async function planCmsMigration(flags: MigrationPlanFlags, source: Org): Promise
     }
 
     const ready = routes.filter((route) => route.state === 'ready-for-execution').length;
-    const uncertain = routes.filter((route) => route.state === 'ownership-uncertain').length;
-    const blocked = routes.length - ready - uncertain;
+    const incomplete = routes.length - ready;
+    const aggregateSuccessful = envelope.status === 'success' && envelope.diagnostics.errors.length === 0;
     return buildCmsPlanningState({
       state:
-        envelope.status !== 'success' || envelope.diagnostics.errors.length > 0
+        ready === 0
           ? 'blocked'
-          : uncertain > 0 && ready === 0 && blocked === 0
-          ? 'ownership-uncertain'
-          : ready > 0 && blocked === 0 && uncertain === 0 && envelope.status === 'success'
+          : incomplete === 0 && aggregateSuccessful
           ? 'ready-for-execution'
-          : ready > 0
-          ? 'partial'
-          : 'blocked',
+          : 'partial',
       capabilities: {
         pluginVersion: info.envelope.result!.plugin.version,
         ...info.capabilities,

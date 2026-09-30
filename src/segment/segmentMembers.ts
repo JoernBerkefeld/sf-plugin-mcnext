@@ -9,6 +9,8 @@ export type SegmentDescriptor = Record<string, unknown> & {
   apiName?: string;
   displayName?: string;
   marketSegmentId?: string;
+  segmentMembershipDmo?: unknown;
+  segmentOnApiName?: unknown;
 };
 
 /** One member row returned by the SSOT segment-members endpoint. */
@@ -88,12 +90,35 @@ export async function showSegment(client: McnClient, apiName: string): Promise<S
   return { ...(segment as SegmentDescriptor), apiName: resolvedApiName };
 }
 
-/** Resolve an API name directly, or through an exact MarketSegment ID or display-name match. */
+/** Resolve an API name directly, or through an exact MarketSegment ID or display-name match, and return its detail envelope. */
+export async function resolveSegment(client: McnClient, selection: string): Promise<SegmentDescriptor> {
+  let directError: unknown;
+  try {
+    return await showSegment(client, selection);
+  } catch (error) {
+    if ((error as Error).name !== 'ITEM_NOT_FOUND') throw error;
+    directError = error;
+  }
+
+  const segments = await listSegments(client);
+  const exactApiName = segments.find((segment) => segment.apiName === selection)?.apiName;
+  if (exactApiName) return showSegment(client, exactApiName);
+
+  const matches = segments.filter(
+    (segment) => segment.marketSegmentId === selection || segment.displayName === selection
+  );
+  if (matches.length === 1 && matches[0].apiName) return showSegment(client, matches[0].apiName);
+  if (matches.length > 1) {
+    throw new SfError(`Segment selection "${selection}" is ambiguous. Use its API name.`, 'AmbiguousSegmentError');
+  }
+  throw directError;
+}
+
+/** Resolve a segment selection to its canonical API name without requiring a second detail request. */
 export async function resolveSegmentApiName(client: McnClient, selection: string): Promise<string> {
   let directError: unknown;
   try {
-    const segment = await showSegment(client, selection);
-    return segment.apiName as string;
+    return (await showSegment(client, selection)).apiName as string;
   } catch (error) {
     if ((error as Error).name !== 'ITEM_NOT_FOUND') throw error;
     directError = error;
@@ -102,7 +127,6 @@ export async function resolveSegmentApiName(client: McnClient, selection: string
   const segments = await listSegments(client);
   const exactApiName = segments.find((segment) => segment.apiName === selection)?.apiName;
   if (exactApiName) return exactApiName;
-
   const matches = segments.filter(
     (segment) => segment.marketSegmentId === selection || segment.displayName === selection
   );

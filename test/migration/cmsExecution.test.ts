@@ -25,14 +25,14 @@ function importFixture(status: 'success' | 'partial' | 'failed' = 'success'): Cm
     status,
     metadata: {
       operation: 'workspace.import',
-      plugin: { name: 'sf-plugin-cms', version: '0.4.0' },
+      plugin: { name: 'sf-plugin-cms', version: '9.8.7' },
       apiVersion: '67.0',
     },
     diagnostics: { warnings: [], errors: [] },
     provenance: {
       producer: 'sf-plugin-cms',
       sourceOrgId: 'offline',
-      pluginVersion: '0.4.0',
+      pluginVersion: '9.8.7',
       command: 'sf cms import workspace',
       generatedAt: '2026-09-27T00:00:00.000Z',
     },
@@ -110,7 +110,7 @@ describe('CMS migration execution', () => {
       targetOrg: 'target',
       targetOrgId,
       workspaceMapSha256: 'b'.repeat(64),
-      routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory }],
+      routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory, packageManifestSha256: manifestSha256 }],
       reportRoot: join(directory, 'reports'),
       cli,
     });
@@ -145,7 +145,7 @@ describe('CMS migration execution', () => {
       targetOrg: 'target',
       targetOrgId,
       workspaceMapSha256: 'b'.repeat(64),
-      routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory }],
+      routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory, packageManifestSha256: manifestSha256 }],
       reportRoot: join(directory, 'reports'),
       cli,
     });
@@ -187,7 +187,7 @@ describe('CMS migration execution', () => {
       targetOrg: 'target',
       targetOrgId,
       workspaceMapSha256: 'b'.repeat(64),
-      routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory }],
+      routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory, packageManifestSha256: manifestSha256 }],
       reportRoot: join(directory, 'reports'),
       cli,
     });
@@ -216,7 +216,7 @@ describe('CMS migration execution', () => {
       targetOrg: 'target',
       targetOrgId,
       workspaceMapSha256: 'b'.repeat(64),
-      routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory }],
+      routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory, packageManifestSha256: manifestSha256 }],
       reportRoot: join(directory, 'reports'),
       cli,
     });
@@ -225,6 +225,31 @@ describe('CMS migration execution', () => {
       () => executeCmsPlan({ plan, targetOrg: fakeOrg(), apply: false, allowExperimental: true, cli }),
       'CMS import result binding changed'
     );
+  });
+
+  it('rejects a changed planned manifest before provider discovery', async () => {
+    const calls: SpawnCall[] = [];
+    const cli = {
+      platform: 'linux' as const,
+      spawn: queuedSpawner([{ envelope: validInfoFixture }], calls),
+    };
+    await writeFile(join(sourceDirectory, 'manifest.json'), '{"changed":true}\n');
+
+    await rejects(
+      () =>
+        buildCmsExecutionPlan({
+          sourcePlanFile,
+          sourcePlanSha256,
+          targetOrg: 'target',
+          targetOrgId,
+          workspaceMapSha256: 'b'.repeat(64),
+          routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory, packageManifestSha256: manifestSha256 }],
+          reportRoot: join(directory, 'reports'),
+          cli,
+        }),
+      'CMS manifest binding changed'
+    );
+    expect(calls).to.have.length(0);
   });
 
   it('rejects target drift, source-plan drift, and missing experimental opt-in before import', async () => {
@@ -239,7 +264,7 @@ describe('CMS migration execution', () => {
       targetOrg: 'target',
       targetOrgId,
       workspaceMapSha256: 'b'.repeat(64),
-      routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory }],
+      routes: [{ sourceWorkspaceId, targetWorkspaceId, sourceDirectory, packageManifestSha256: manifestSha256 }],
       reportRoot: join(directory, 'reports'),
       cli,
     });
