@@ -23,6 +23,12 @@ export type PaginationLimits = {
   maxDurationMs?: number;
 };
 
+export type PageProgress = {
+  batch: number;
+  expectedBatches?: number;
+  rows: number;
+};
+
 type PagedEnvelope = Record<string, unknown> & {
   nextPageUrl?: string;
   nextPageUri?: string;
@@ -189,10 +195,12 @@ export class McnClient {
   }
 
   /** Yield bounded pages so export writers can process rows incrementally. */
+  // eslint-disable-next-line complexity -- request pagination validates all cursor and progress invariants together
   public async *requestPages<T>(
     options: RequestOptions,
     pageSize = 200,
-    limits: PaginationLimits = {}
+    limits: PaginationLimits = {},
+    onProgress?: (progress: PageProgress) => void
   ): AsyncGenerator<T[]> {
     const effective = { ...DEFAULT_LIMITS, ...limits };
     const started = Date.now();
@@ -200,7 +208,11 @@ export class McnClient {
       ? Number(options.query?.[options.pageSizeParam] ?? pageSize)
       : pageSize;
     const visitedPointers = new Set<string>();
-    let state: PaginationState = { emitted: 0, pageCount: 0, offset: Number(options.query?.offset ?? 0) };
+    const initialOffset = Number(options.query?.offset ?? 0);
+    let expectedBatches: number | undefined;
+    let expectedTotal: number | undefined;
+    let expectedPageSize: number | undefined;
+    let state: PaginationState = { emitted: 0, pageCount: 0, offset: initialOffset };
 
     for (;;) {
       assertWithinLimits(state, effective, started);
@@ -211,6 +223,22 @@ export class McnClient {
       const remaining = effective.maxItems - state.emitted;
       const emittedBatch = batch.slice(0, Math.max(0, remaining));
       state = { ...state, emitted: state.emitted + emittedBatch.length, pageCount: state.pageCount + 1 };
+      const total = page.totalSize ?? page.totalCount;
+      const servedPageSize = page.batchSize ?? page.limit ?? requestedPageSize;
+      assertPositiveInteger(servedPageSize, 'page size');
+      if (expectedPageSize !== undefined && expectedPageSize !== servedPageSize)
+        throw new SfError('Pagination page size changed between pages.', 'PaginationEnvelopeError');
+      expectedPageSize = servedPageSize;
+      if (total !== undefined) {
+        assertNonnegativeInteger(total, 'total count');
+        if (expectedTotal !== undefined && expectedTotal !== total)
+          throw new SfError('Pagination total count changed between pages.', 'PaginationEnvelopeError');
+        expectedTotal = total;
+        const requestedRows = Math.min(Math.max(total - initialOffset, 0), effective.maxItems);
+        const calculatedBatches = Math.ceil(requestedRows / servedPageSize);
+        expectedBatches ??= calculatedBatches > 0 ? calculatedBatches : undefined;
+      }
+      onProgress?.({ batch: state.pageCount, ...(expectedBatches === undefined ? {} : { expectedBatches }), rows: state.emitted });
       yield emittedBatch;
       if (state.emitted >= effective.maxItems) return;
 

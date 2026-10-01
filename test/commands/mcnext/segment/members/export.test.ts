@@ -1,12 +1,16 @@
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { Org } from '@salesforce/core';
 import { TestContext } from '@salesforce/core/testSetup';
 import { expect } from 'chai';
+import { Org as FlagOrg } from '../../../../../node_modules/@salesforce/sf-plugins-core/node_modules/@salesforce/core/lib/org/org.js';
 import { McnClient, PaginationLimits } from '../../../../../src/client/mcnClient.js';
 import SegmentMembersExport, {
   exportSegmentMembers,
+  normalizeFieldValue,
+  resolveColumnHeaders,
+  sanitizeFilename,
 } from '../../../../../src/commands/mcnext/segment/members/export.js';
 import { resolveSegmentApiName } from '../../../../../src/segment/segmentMembers.js';
 
@@ -60,6 +64,67 @@ describe('mcnext segment members export', () => {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it('allocates stable unique labels and preserves API-name order', () => {
+    const columns = [
+      { name: 'First__c', label: 'Name' },
+      { name: 'Second__c', label: 'Name' },
+      { name: 'Third__c', label: 'Name_2' },
+      { name: 'Fourth__c', label: '   ' },
+    ];
+    expect(resolveColumnHeaders(columns, 'label')).to.deep.equal(['Name', 'Name_2', 'Name_2_2', 'Fourth__c']);
+    expect(resolveColumnHeaders(columns, 'api-name')).to.deep.equal(columns.map((column) => column.name));
+  });
+
+  it('formats DATE and DATETIME values without timezone loss and preserves nulls', () => {
+    expect(normalizeFieldValue('1982-12-16T00:00:00+00:00', 'DATE')).to.equal('1982-12-16');
+    expect(normalizeFieldValue('2026-10-01T13:15:16.123+02:00', 'DateTime')).to.equal(
+      '2026-10-01 13:15:16.123+02:00'
+    );
+    expect(normalizeFieldValue(null, 'DATE')).to.equal(null);
+    expect(normalizeFieldValue('not-a-date', 'DATE')).to.equal('not-a-date');
+  });
+
+  it('sanitizes Windows-invalid, reserved, and empty filename components', () => {
+    expect(sanitizeFilename('Annual: Promo / West?')).to.equal('Annual-Promo-West');
+    expect(sanitizeFilename('CON')).to.equal('segment-CON');
+    expect(sanitizeFilename('   ... ')).to.equal('segment-members');
+  });
+
+  it('resolves an explicit target org through the standard Salesforce CLI org flag', async () => {
+    const expected = {} as FlagOrg;
+    const create = $$.SANDBOX.stub(FlagOrg, 'create').resolves(expected);
+    const flag = SegmentMembersExport.flags['target-org'];
+
+    const resolved = await flag.parse('test@example.com', {} as never, flag);
+
+    expect(resolved).to.equal(expected);
+    expect(create.calledOnceWithExactly({ aliasOrUsername: 'test@example.com' })).to.equal(true);
+  });
+
+  it('resolves the standard Salesforce CLI default org when target-org is omitted', async () => {
+    const expected = {} as FlagOrg;
+    const create = $$.SANDBOX.stub(FlagOrg, 'create').resolves(expected);
+    const flag = SegmentMembersExport.flags['target-org'];
+
+    const resolveDefault = flag.default as unknown as (context: never) => Promise<FlagOrg>;
+    const resolved = await resolveDefault({} as never);
+
+    expect(resolved).to.equal(expected);
+    expect(create.calledOnceWithExactly({ aliasOrUsername: undefined })).to.equal(true);
+  });
+
+  it('returns the standard useful failure when neither target-org nor a default org exists', async () => {
+    $$.SANDBOX.stub(FlagOrg, 'create').rejects(new Error('No authorization information found'));
+    const flag = SegmentMembersExport.flags['target-org'];
+
+    const resolveDefault = flag.default as unknown as (context: never) => Promise<FlagOrg>;
+    const error = await captureError(resolveDefault({} as never));
+
+    expect(error.name).to.equal('NoDefaultEnvError');
+    expect(error.message).to.contain('No default environment found');
+    expect(error.message).to.contain('--target-org');
+  });
+
   it('omits unset pagination limits so McnClient defaults remain active', async () => {
     const command = Object.create(SegmentMembersExport.prototype) as SegmentMembersExport;
     const requestPages = $$.SANDBOX.stub().returns(
@@ -72,12 +137,13 @@ describe('mcnext segment members export', () => {
       requestPages,
     } as unknown as McnClient;
     $$.SANDBOX.stub(McnClient, 'create').resolves(client);
-    $$.SANDBOX.stub(Org, 'create').resolves({} as Org);
+    const org = { getUsername: () => 'test@example.com' } as Org;
 
     Object.assign(command, {
+      logToStderr: $$.SANDBOX.stub(),
       parse: $$.SANDBOX.stub().resolves({
         flags: {
-          'target-org': 'test@example.com',
+          'target-org': org,
           segment: 'Annual_Promo',
           'output-file': join(directory, 'members.json'),
           'result-format': 'json',
@@ -91,6 +157,51 @@ describe('mcnext segment members export', () => {
 
     expect(requestPages.calledOnce).to.equal(true);
     expect(requestPages.firstCall.args[2] as PaginationLimits).to.deep.equal({});
+  });
+
+  it('reports resolved, known and unknown batch progress plus final confirmation on stderr', async () => {
+    const command = Object.create(SegmentMembersExport.prototype) as SegmentMembersExport;
+    const logToStderr = $$.SANDBOX.stub();
+    const client = {
+      request: async () => ({ segments: [{ apiName: 'Annual_Promo' }] }),
+      async *requestPages(
+        _request: PageOptions,
+        _pageSize: number,
+        _limits: PaginationLimits,
+        onProgress?: (progress: { batch: number; expectedBatches?: number; rows: number }) => void
+      ) {
+        onProgress?.({ batch: 1, expectedBatches: 2, rows: 1 });
+        yield [{ id: 'one' }];
+        onProgress?.({ batch: 2, expectedBatches: 2, rows: 2 });
+        yield [{ id: 'two' }];
+      },
+    } as unknown as McnClient;
+    $$.SANDBOX.stub(McnClient, 'create').resolves(client);
+    const org = { getUsername: () => 'test@example.com' } as Org;
+    Object.assign(command, {
+      logToStderr,
+      parse: $$.SANDBOX.stub().resolves({
+        flags: {
+          'target-org': org,
+          segment: 'Annual_Promo',
+          'output-file': join(directory, 'progress.json'),
+          'result-format': 'json',
+          'column-headers': 'label',
+          limit: 200,
+          offset: 0,
+        },
+      }),
+    });
+
+    const result = await command.run();
+
+    expect(result.rowsWritten).to.equal(2);
+    expect(logToStderr.args.map((args: unknown[]) => args[0])).to.deep.equal([
+      'Found segment Annual_Promo. Starting download.',
+      'Downloading batch 1 of 2',
+      'Downloading batch 2 of 2',
+      `Saved 2 segment members to ${join(directory, 'progress.json')}`,
+    ]);
   });
 
   for (const flagName of ['max-pages', 'max-items', 'max-duration-ms'] as const) {
@@ -236,8 +347,203 @@ describe('mcnext segment members export', () => {
       includeDetails: false,
       dataSpace: 'default',
       rowsWritten: 2,
+      columnHeaders: 'api-name',
       complete: true,
     });
+  });
+
+  it('generates an absolute sanitized collision-safe filename when output-file is omitted', async () => {
+    const previousCwd = process.cwd();
+    process.chdir(directory);
+    try {
+      const client = clientWith({ segments: [{ apiName: 'Annual_Promo', displayName: 'Annual: Promo?' }], pages: [[]] });
+      const first = await exportSegmentMembers({
+        client,
+        segment: 'Annual: Promo?',
+        resultFormat: 'json',
+        limit: 200,
+        paginationLimits: {},
+      });
+      const second = await exportSegmentMembers({
+        client,
+        segment: 'Annual: Promo?',
+        resultFormat: 'json',
+        limit: 200,
+        paginationLimits: {},
+      });
+
+      expect(isAbsolute(first.outputFile)).to.equal(true);
+      expect(first.outputFile).to.match(/Annual-Promo-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.json$/u);
+      expect(second.outputFile).to.match(/_2\.json$/u);
+      expect(second.outputFile).not.to.equal(first.outputFile);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('writes a generated destination through sibling staging before atomic replacement', async () => {
+    const previousCwd = process.cwd();
+    process.chdir(directory);
+    try {
+      let filesDuringWrite: string[] = [];
+      const client = {
+        request: async () => ({ segments: [{ apiName: 'Annual_Promo', displayName: 'Annual Promo' }] }),
+        async *requestPages() {
+          filesDuringWrite = await readdir(directory);
+          yield [{ id: 'opaque-1' }];
+        },
+      } as unknown as McnClient;
+
+      const result = await exportSegmentMembers({
+        client,
+        segment: 'Annual_Promo',
+        resultFormat: 'json',
+        limit: 200,
+        paginationLimits: {},
+      });
+
+      const destinationName = result.outputFile.split(/[\\/]/u).at(-1) as string;
+      expect(filesDuringWrite).to.include(destinationName);
+      expect(filesDuringWrite.some((name) => name.startsWith(`.${destinationName}.`) && name.endsWith('.stage'))).to.equal(
+        true
+      );
+      expect(await readdir(directory)).to.deep.equal([destinationName]);
+      expect(JSON.parse(await readFile(result.outputFile, 'utf8'))).to.deep.equal([{ id: 'opaque-1' }]);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('removes generated reservation and staging artifacts when atomic writing fails', async () => {
+    const previousCwd = process.cwd();
+    process.chdir(directory);
+    try {
+      let filesDuringWrite: string[] = [];
+      const client = {
+        request: async () => ({ segments: [{ apiName: 'Annual_Promo', displayName: 'Annual Promo' }] }),
+        async *requestPages() {
+          filesDuringWrite = await readdir(directory);
+          yield [{ id: 'opaque-1' }];
+          throw new Error('generated page failed');
+        },
+      } as unknown as McnClient;
+
+      const error = await captureError(
+        exportSegmentMembers({
+          client,
+          segment: 'Annual_Promo',
+          resultFormat: 'json',
+          limit: 200,
+          paginationLimits: {},
+        })
+      );
+
+      expect(error.message).to.contain('generated page failed');
+      expect(filesDuringWrite.some((name) => name.endsWith('.json'))).to.equal(true);
+      expect(filesDuringWrite.some((name) => name.endsWith('.stage'))).to.equal(true);
+      expect(await readdir(directory)).to.deep.equal([]);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('removes a generated enriched destination when row streaming fails', async () => {
+    const previousCwd = process.cwd();
+    process.chdir(directory);
+    try {
+      const columns = Array.from({ length: 19 }, (_, index) => ({
+        name: index === 0 ? 'ssot__Id__c' : `Field${String(index).padStart(2, '0')}__c`,
+        displayName: `Field ${index}`,
+        ...(index === 0 ? { keyQualifier: 'Individual' } : {}),
+      }));
+      const client = {
+        request: async (request: RequestOptions) => {
+          if (request.path === '/ssot/segments/Annual_Promo')
+            return {
+              segments: [
+                {
+                  apiName: 'Annual_Promo',
+                  displayName: 'Annual Promo',
+                  segmentMembershipDmo: { latestTable: 'Individual_Unified_SM_1__dlm' },
+                  segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
+                },
+              ],
+            };
+          if (request.path === '/query')
+            return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+          if (request.path === '/ssot/metadata')
+            return {
+              metadata: [
+                {
+                  name: 'Individual_Unified_SM_1__dlm',
+                  fields: [{ name: 'Id__c' }, { name: 'Individual_Id__c', keyQualifier: 'Membership' }],
+                  primaryKeys: ['Id__c'],
+                  relationships: [
+                    {
+                      fromEntity: 'Individual_Unified_SM_1__dlm',
+                      toEntity: 'UnifiedssotIndividualMkt__dlm',
+                      fromField: 'Individual_Id__c',
+                      toField: 'ssot__Id__c',
+                      fromKeyQualifier: 'Membership',
+                      toKeyQualifier: 'Individual',
+                      cardinality: 'many-to-one',
+                    },
+                  ],
+                },
+                {
+                  name: 'UnifiedssotIndividualMkt__dlm',
+                  fields: columns,
+                  primaryKeys: ['ssot__Id__c'],
+                  relationships: [],
+                },
+              ],
+            };
+          return {
+            status: 'RUNNING',
+            metadata: [
+              ...columns.map((column) => ({ name: column.name })),
+              { name: 'membership_key_internal' },
+              { name: 'detail_match_count_internal' },
+            ],
+            data: [[...columns.map(() => 'value'), 'membership-1', 1]],
+            totalSize: 1,
+          };
+        },
+      } as unknown as McnClient;
+      await captureError(
+        exportSegmentMembers({
+          client,
+          segment: 'Annual_Promo',
+          resultFormat: 'json',
+          includeDetails: true,
+          limit: 200,
+          paginationLimits: {},
+        })
+      );
+      expect(await readdir(directory)).to.deep.equal([]);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('preserves explicit output-file compatibility while returning an absolute path', async () => {
+    const previousCwd = process.cwd();
+    process.chdir(directory);
+    try {
+      const client = clientWith({ segments: [{ apiName: 'Annual_Promo' }], pages: [[{ id: 'one' }]] });
+      const result = await exportSegmentMembers({
+        client,
+        segment: 'Annual_Promo',
+        outputFile: 'explicit.json',
+        resultFormat: 'json',
+        limit: 200,
+        paginationLimits: {},
+      });
+      expect(result.outputFile).to.equal(join(directory, 'explicit.json'));
+      expect(JSON.parse(await readFile(result.outputFile, 'utf8'))).to.deep.equal([{ id: 'one' }]);
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 
   it('writes CSV using stable first-row columns and configured formatting', async () => {
@@ -302,7 +608,8 @@ describe('mcnext segment members export', () => {
     it(`exports enriched ${resultFormat.toUpperCase()} with 19 ordered columns and data-space provenance`, async () => {
       const columns = Array.from({ length: 19 }, (_, index) => ({
         name: index === 0 ? 'ssot__Id__c' : `Field${String(index).padStart(2, '0')}__c`,
-        displayName: `Field ${index}`,
+        displayName: index === 0 ? 'Member ID' : index === 1 ? 'Member ID' : index === 2 ? '' : `Field ${index}`,
+        type: index === 3 ? 'DATE' : index === 4 ? 'DATETIME' : 'Text',
         ...(index === 0 ? { keyQualifier: 'Individual' } : {}),
       }));
       const requests: RequestOptions[] = [];
@@ -358,7 +665,19 @@ describe('mcnext segment members export', () => {
               { name: 'membership_key_internal' },
               { name: 'detail_match_count_internal' },
             ],
-            data: [[...columns.map((_, index) => (index === 1 ? null : `value-${index}`)), 'membership-1', 1]],
+            data: [[
+              ...columns.map((_, index) =>
+                index === 1
+                  ? null
+                  : index === 3
+                    ? '1982-12-16T00:00:00+00:00'
+                    : index === 4
+                      ? '2026-10-01T13:15:16.123+02:00'
+                      : `value-${index}`
+              ),
+              'membership-1',
+              1,
+            ]],
             totalSize: 1,
           };
         },
@@ -377,23 +696,116 @@ describe('mcnext segment members export', () => {
       });
 
       const names = columns.map((column) => column.name);
+      const labels = ['Member ID', 'Member ID_2', names[2], ...columns.slice(3).map((column) => column.displayName)];
       if (resultFormat === 'json') {
         const data = JSON.parse(await readFile(outputFile, 'utf8')) as Array<Record<string, unknown>>;
-        expect(Object.keys(data[0])).to.deep.equal(names);
-        expect(data[0][names[1]]).to.equal(null);
+        expect(Object.keys(data[0])).to.deep.equal(labels);
+        expect(data[0]['Member ID_2']).to.equal(null);
+        expect(data[0][labels[3]]).to.equal('1982-12-16');
+        expect(data[0][labels[4]]).to.equal('2026-10-01 13:15:16.123+02:00');
       } else {
-        expect((await readFile(outputFile, 'utf8')).split('\n')[0].split(',')).to.deep.equal(names);
+        const lines = (await readFile(outputFile, 'utf8')).split('\n');
+        expect(lines[0].split(',')).to.deep.equal(labels);
+        expect(lines[1]).to.contain('1982-12-16');
+        expect(lines[1]).to.contain('2026-10-01 13:15:16.123+02:00');
       }
       expect(
         requests
           .map((request) => request.headers?.['Data-Space'])
           .filter((header): header is string => header !== undefined)
       ).to.deep.equal(['Marketing', 'Marketing']);
-      expect(result).to.include({ includeDetails: true, dataSpace: 'Marketing', rowsWritten: 1 });
+      expect(result).to.include({
+        includeDetails: true,
+        dataSpace: 'Marketing',
+        rowsWritten: 1,
+        columnHeaders: 'label',
+      });
       expect(result.enriched?.objectApiName).to.equal('UnifiedssotIndividualMkt__dlm');
       expect(result.enriched?.columns.map((column) => column.name)).to.deep.equal(names);
     });
   }
+
+  it('uses API-name headers consistently for enriched CSV and JSON', async () => {
+    const columns = Array.from({ length: 19 }, (_, index) => ({
+      name: index === 0 ? 'ssot__Id__c' : `Field${String(index).padStart(2, '0')}__c`,
+      displayName: 'Duplicate',
+      type: 'Text',
+      ...(index === 0 ? { keyQualifier: 'Individual' } : {}),
+    }));
+    for (const resultFormat of ['csv', 'json'] as const) {
+      /* eslint-disable no-await-in-loop -- each format verifies an independent output transaction */
+      const client = {
+        request: async (request: RequestOptions) => {
+          if (request.path === '/ssot/segments/Annual_Promo')
+            return {
+              segments: [
+                {
+                  apiName: 'Annual_Promo',
+                  segmentMembershipDmo: { latestTable: 'Individual_Unified_SM_1__dlm' },
+                  segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
+                },
+              ],
+            };
+          if (request.path === '/query')
+            return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+          if (request.path === '/ssot/metadata')
+            return {
+              metadata: [
+                {
+                  name: 'Individual_Unified_SM_1__dlm',
+                  fields: [{ name: 'Id__c' }, { name: 'Individual_Id__c', keyQualifier: 'Membership' }],
+                  primaryKeys: ['Id__c'],
+                  relationships: [
+                    {
+                      fromEntity: 'Individual_Unified_SM_1__dlm',
+                      toEntity: 'UnifiedssotIndividualMkt__dlm',
+                      fromField: 'Individual_Id__c',
+                      toField: 'ssot__Id__c',
+                      fromKeyQualifier: 'Membership',
+                      toKeyQualifier: 'Individual',
+                      cardinality: 'many-to-one',
+                    },
+                  ],
+                },
+                {
+                  name: 'UnifiedssotIndividualMkt__dlm',
+                  fields: columns,
+                  primaryKeys: ['ssot__Id__c'],
+                  relationships: [],
+                },
+              ],
+            };
+          return {
+            queryId: 'query-1',
+            metadata: [
+              ...columns.map((column) => ({ name: column.name })),
+              { name: 'membership_key_internal' },
+              { name: 'detail_match_count_internal' },
+            ],
+            data: [[...columns.map((_, index) => `value-${index}`), 'membership-1', 1]],
+            totalSize: 1,
+          };
+        },
+      } as unknown as McnClient;
+      const outputFile = join(directory, `api-names.${resultFormat}`);
+      await exportSegmentMembers({
+        client,
+        segment: 'Annual_Promo',
+        outputFile,
+        resultFormat,
+        columnHeaders: 'api-name',
+        includeDetails: true,
+        limit: 200,
+        paginationLimits: {},
+      });
+      const names = columns.map((column) => column.name);
+      if (resultFormat === 'json') {
+        const data = JSON.parse(await readFile(outputFile, 'utf8')) as Array<Record<string, unknown>>;
+        expect(Object.keys(data[0])).to.deep.equal(names);
+      } else expect((await readFile(outputFile, 'utf8')).split('\n')[0].split(',')).to.deep.equal(names);
+      /* eslint-enable no-await-in-loop */
+    }
+  });
 
   it('rejects an unavailable data space before metadata/query and preserves the destination byte-for-byte', async () => {
     const outputFile = join(directory, 'invalid-space.json');

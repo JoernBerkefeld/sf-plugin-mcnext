@@ -231,22 +231,42 @@ describe('segment member detail service', () => {
     const submission = JSON.parse(requests[2].body ?? '{}') as { sql: string };
     expect(submission.sql).to.include('LEFT JOIN');
     expect(submission.sql).to.include('ORDER BY "membership_key_internal"');
-    expect(submission.sql).to.match(/LIMIT 2000$/u);
+    expect(submission.sql).to.match(/LIMIT 1000000$/u);
   });
 
-  it('uses the smaller request or emitted-record bound in synchronous SQL', async () => {
+  it('uses max-items as the SQL total bound while rowLimit remains the Query API page size', async () => {
     const bounded = await clientReturning([
       metadata,
-      { status: 'COMPLETED', metadata: outputMetadata, data: [row(1)], totalSize: 1 },
+      { queryId: 'query-bounded', status: 'COMPLETED' },
+      {
+        queryId: 'query-bounded',
+        metadata: outputMetadata,
+        rows: Array.from({ length: 200 }, (_, index) => row(1, `membership-${index + 1}`)),
+        offset: 0,
+        rowLimit: 200,
+        totalCount: 201,
+      },
+      {
+        queryId: 'query-bounded',
+        metadata: outputMetadata,
+        rows: [row(1, 'membership-201')],
+        offset: 200,
+        rowLimit: 200,
+        totalCount: 201,
+      },
     ]);
     const result = await querySegmentMemberDetails(bounded.client, source, {
       rowLimit: 200,
-      paginationLimits: { maxItems: 10 },
+      paginationLimits: { maxItems: 500 },
     });
 
-    expect(await collect(result.rows)).to.have.length(1);
+    expect(await collect(result.rows)).to.have.length(201);
     const submission = JSON.parse(bounded.requests[2].body ?? '{}') as { sql: string };
-    expect(submission.sql).to.match(/LIMIT 10$/u);
+    expect(submission.sql).to.match(/LIMIT 500$/u);
+    expect(bounded.requests.slice(3).map((request) => request.url)).to.deep.equal([
+      '/services/data/v67.0/ssot/query-sql/query-bounded',
+      '/services/data/v67.0/ssot/query-sql/query-bounded/rows?offset=200&rowLimit=200',
+    ]);
   });
 
   it('fails closed when synchronous rows declare more data without a query ID', async () => {

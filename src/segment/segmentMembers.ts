@@ -36,9 +36,10 @@ export type SegmentMembersResult = {
 export async function createSegmentMembersRequest(
   client: McnClient,
   segment: string,
-  options: SegmentMembersOptions = {}
+  options: SegmentMembersOptions = {},
+  resolvedSegmentApiName?: string
 ): Promise<{ segmentApiName: string; request: RequestOptions; pageSize: number }> {
-  const segmentApiName = await resolveSegmentApiName(client, segment);
+  const segmentApiName = resolvedSegmentApiName ?? (await resolveSegmentApiName(client, segment));
   const pageSize = options.limit ?? DEFAULT_PAGE_SIZE;
   return {
     segmentApiName,

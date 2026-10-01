@@ -10,9 +10,9 @@ CSV and JSON outputs are staged beside the destination and replace it only after
 
 # examples
 
-- Export basic members by segment API name as CSV:
+- Export basic members by segment API name as CSV using the configured default org:
 
-  <%= config.bin %> <%= command.id %> --target-org my-org --segment My_Published_Segment --output-file members.csv
+  <%= config.bin %> <%= command.id %> --segment My_Published_Segment --output-file members.csv
 
 - Export 19-field Unified Individual details as JSON from a named data space:
 
@@ -24,7 +24,7 @@ CSV and JSON outputs are staged beside the destination and replace it only after
 
 # flags.target-org.summary
 
-Username or alias of the Marketing Cloud Next org.
+Username or alias of the Marketing Cloud Next org. Not required if the `target-org` configuration variable is already set.
 
 # flags.segment.summary
 
@@ -32,11 +32,15 @@ Segment API name, MarketSegment record ID, or exact segment display name.
 
 # flags.output-file.summary
 
-Destination file for exported member rows. Existing bytes are normally restored on failure; exceptional restoration failure reports the exact retained backup path.
+Optional destination file for exported member rows. When omitted, a collision-safe absolute filename is generated from the segment name and local timestamp. Existing explicit destination bytes are normally restored on failure; exceptional restoration failure reports the exact retained backup path.
 
 # flags.result-format.summary
 
 Write member rows as CSV or JSON.
+
+# flags.column-headers.summary
+
+Use field labels or API names as enriched CSV and JSON keys. Labels are the default; empty labels fall back to API names and duplicates receive stable numeric suffixes.
 
 # flags.include-details.summary
 

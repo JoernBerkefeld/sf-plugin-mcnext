@@ -1,11 +1,12 @@
 import { SfError } from '@salesforce/core';
-import { McnClient, PaginationLimits } from '../client/mcnClient.js';
+import { McnClient, PageProgress, PaginationLimits } from '../client/mcnClient.js';
 
 const METADATA_PATH = '/ssot/metadata';
 const QUERY_PATH = '/ssot/query-sql';
 const CORE_QUERY_PATH = '/query';
 const DEFAULT_DATA_SPACE = 'default';
 const DEFAULT_ROW_LIMIT = 2000;
+const DEFAULT_MAX_ITEMS = 1_000_000;
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/u;
 const INTERNAL_MEMBERSHIP_COLUMN = 'membership_key_internal';
 const INTERNAL_MATCH_COUNT_COLUMN = 'detail_match_count_internal';
@@ -45,6 +46,7 @@ export type SegmentMemberDetailQueryOptions = {
     intervalMs?: number;
   };
   paginationLimits?: PaginationLimits;
+  onProgress?: (progress: PageProgress) => void;
 };
 
 /** Metadata plus an incremental iterator of details-only rows. */
@@ -235,8 +237,7 @@ export async function querySegmentMemberDetails(
 ): Promise<SegmentMemberDetailResult> {
   const dataSpace = await validateDataSpace(client, options.dataSpace);
   const discovery = await discoverSegmentMemberDetails(client, source, dataSpace);
-  const rowLimit = options.rowLimit ?? DEFAULT_ROW_LIMIT;
-  const outputLimit = Math.min(rowLimit, options.paginationLimits?.maxItems ?? rowLimit);
+  const outputLimit = options.paginationLimits?.maxItems ?? DEFAULT_MAX_ITEMS;
   const sql = buildSegmentMemberDetailsSql(discovery, outputLimit);
   const submission = await client.request<unknown>({
     path: QUERY_PATH,
@@ -296,6 +297,8 @@ async function* iterateQueryRows(
   let offset = 0;
   let pages = 0;
   let emitted = 0;
+  let expectedTotal: number | undefined;
+  let expectedBatches: number | undefined;
   const rowLimit = options.rowLimit ?? DEFAULT_ROW_LIMIT;
   const maxPages = options.paginationLimits?.maxPages ?? 1000;
   const maxItems = options.paginationLimits?.maxItems ?? 1_000_000;
@@ -320,10 +323,18 @@ async function* iterateQueryRows(
     const rows = getRows(page);
     validateColumnMetadata(page.metadata, expectedNames);
     const total = numericTotal(page);
+    if (total !== undefined) {
+      if (expectedTotal !== undefined && expectedTotal !== total)
+        throw new SfError('Data 360 query total count changed between pages.', 'InvalidData360RowsEnvelope');
+      expectedTotal = total;
+      const calculatedBatches = Math.ceil(total / rowLimit);
+      expectedBatches ??= calculatedBatches > 0 ? calculatedBatches : undefined;
+    }
     validateRowsPage(page, offset, rowLimit, rows.length, total);
     if (!queryId) validateTerminalSinglePage(page, rows.length, total);
     pages += 1;
     emitted += rows.length;
+    options.onProgress?.({ batch: pages, ...(expectedBatches === undefined ? {} : { expectedBatches }), rows: emitted });
     if (emitted > maxItems)
       throw new SfError('Data 360 row pagination exceeded the item limit.', 'Data360RowsLimitError');
     for (const row of rows) {

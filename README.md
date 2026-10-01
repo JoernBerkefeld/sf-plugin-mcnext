@@ -22,7 +22,7 @@ sf plugins install sf-plugin-mcnext
 sf plugins update
 ```
 
-Version `0.6.2` exposes the 15 public commands documented below.
+Version `0.8.0` exposes the 15 public commands documented below.
 
 MCNext declares the released [`sf-plugin-cms`](https://github.com/JoernBerkefeld/sf-plugin-cms) package as an installed oclif plugin dependency. A normal MCNext installation therefore installs and registers the compatible CMS provider automatically; users do not need a separate `sf plugins install sf-plugin-cms` step.
 
@@ -38,12 +38,13 @@ The integration still uses the public Salesforce CLI boundary: MCNext invokes `s
 
 The examples use safe representative values such as `my-mcnext-org`, `Annual_Promo`, and `00D000000000001AAA`. Replace those values for your environment.
 
-Normal Salesforce CLI org authorization covers `segment members export` and every other org-backed command in this plugin. Use any supported `sf org login` mode for the target org; you do not need a separate Connected App or authentication stack for `--include-details`.
+Normal Salesforce CLI org authorization covers `segment members export` and every other org-backed command in this plugin. Use any supported `sf org login` mode for the target org; you do not need a separate Connected App or authentication stack for `--include-details`. For `segment members export`, `--target-org` can be omitted when the standard Salesforce CLI `target-org` configuration variable is set.
 
 ```bash
 sf org login web --alias my-mcnext-org --instance-url https://login.salesforce.com
 sf mcnext list types
-sf mcnext segment members export --target-org my-mcnext-org --segment Annual_Promo --output-file members.csv --max-items 100
+sf config set target-org=my-mcnext-org
+sf mcnext segment members export --segment Annual_Promo --output-file members.csv --max-items 100
 ```
 
 Only `sf mcnext data-graph metadata` uses an externally obtained Data 360 token and tenant URL. That command's token can come from an External Client App flow; it is intentionally separate from normal CLI org authentication.
@@ -98,16 +99,16 @@ sf mcnext list types --state conditional
 
 Resolves a segment once and exports computed member rows. `--segment` accepts exactly these three identifier forms: the segment API/developer name, the exact display name, or a 15- or 18-character `MarketSegment` record ID. Display-name matches must be exact and unambiguous.
 
-Basic mode is the default (`--include-details=false`) and preserves the v0.6.2 resolution and members endpoint contract. CSV uses the first returned row's keys as a stable header and column set; JSON contains the returned row objects. The endpoint's member `id` remains an opaque SSOT/Watson membership value. `--fields`, `--filters`, `--order-by`, and `--offset` apply only to this basic endpoint mode and are rejected with `--include-details`.
+Basic mode is the default (`--include-details=false`) and preserves the v0.6.2 resolution and members endpoint contract. CSV uses the first returned row's keys as a stable header and column set; JSON contains the returned row objects. Because this endpoint doesn't provide field-label schema, basic exports retain response/API keys regardless of `--column-headers`. The endpoint's member `id` remains an opaque SSOT/Watson membership value. `--fields`, `--filters`, `--order-by`, and `--offset` apply only to this basic endpoint mode and are rejected with `--include-details`.
 
 Enriched mode (`--include-details`) reads the latest-membership and segment-on DMO names from the resolved segment detail envelope. Before metadata or Query API access, it validates `--data-space` against the authorized user's core `DataSpace` records, because Data 360 metadata and synchronous Query API can silently fall back when given an unknown `Data-Space` header. The authorized org user needs read access to `DataSpace`, the segment, the selected data space, Data 360 metadata, Query API, and the involved DMOs. This does not require a separate Connected App.
 
-The enriched output is details-only: exactly the 19 fields exposed by `UnifiedssotIndividualMkt__dlm`, in Data 360 service metadata order. There is one output row per membership. No membership key or match-count helper is emitted. A membership without a matching detail row has all 19 values as null: JSON writes explicit `null`; CSV writes empty cells. Multiple detail matches fail closed rather than duplicating a member.
+The enriched output is details-only: exactly the 19 fields exposed by `UnifiedssotIndividualMkt__dlm`, in Data 360 service metadata order. `--column-headers label|api-name` selects CSV headers and JSON keys; labels are the default. Empty labels fall back to the API name, and duplicate/colliding labels receive stable `_2`, `_3`, and later suffixes without dropping fields. Schema DATE values are written as `YYYY-MM-DD`; schema DATETIME values replace the date/time `T` with a space while preserving fractions and timezone text. There is one output row per membership. No membership key or match-count helper is emitted. A membership without a matching detail row has all 19 values as null: JSON writes explicit `null`; CSV writes empty cells. Multiple detail matches fail closed rather than duplicating a member.
 
-Both modes stage CSV or JSON beside the destination and replace it only after segment discovery, metadata/query requests, paging, schema validation, formatting, file close, and final replacement all succeed. Normally, a failure restores the existing destination bytes and removes staging artifacts. In the exceptional case where automatic restoration cannot complete, the command raises `AtomicOutputRecoveryError`; its message reports whether the destination is absent, present, or unknown and gives the exact sibling backup path retaining the original bytes. The default paging safety bounds are 1,000 pages, 1,000,000 items, and 900,000 ms.
+Both modes stage CSV or JSON beside the destination and replace it only after segment discovery, metadata/query requests, paging, schema validation, formatting, file close, and final replacement all succeed. `--output-file` is optional: when omitted, the command creates an absolute `<sanitized-segmentName>-YYYY-MM-DD_HH-MM-SS.<csv|json>` path in the current directory, replaces Windows-invalid characters with hyphens, protects reserved device names, falls back to `segment-members`, and adds `_2`, `_3`, and later suffixes on collisions. During retrieval, progress is written to stderr so `--json` stdout remains parseable. Normally, a failure restores the existing destination bytes and removes staging artifacts. In the exceptional case where automatic restoration cannot complete, the command raises `AtomicOutputRecoveryError`; its message reports whether the destination is absent, present, or unknown and gives the exact sibling backup path retaining the original bytes. The default paging safety bounds are 1,000 pages, 1,000,000 items, and 900,000 ms.
 
 ```bash
-sf mcnext segment members export --target-org my-mcnext-org --segment Annual_Promo --output-file members.csv
+sf mcnext segment members export --segment Annual_Promo --output-file members.csv
 sf mcnext segment members export --target-org my-mcnext-org --segment "Annual Promo" --output-file members.json --result-format json --fields Id__c,Delta_Type__c --filters "Delta_Type__c in ('new')" --order-by "Id__c asc" --limit 100 --offset 0
 sf mcnext segment members export --target-org my-mcnext-org --segment Annual_Promo --output-file member-details.csv --include-details
 sf mcnext segment members export --target-org my-mcnext-org --segment Annual_Promo --output-file member-details.json --result-format json --include-details --data-space Marketing
@@ -122,10 +123,11 @@ The enriched path passed the full packed installed-host live matrix for CSV and 
 
 | Option                                                | Required | Expected/allowed values                                                                                                                                                                                                   |
 | ----------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--target-org <alias-or-username>`, `-o`              | Yes      | Authorized Marketing Cloud Next org alias or username. String; not repeatable.                                                                                                                                            |
+| `--target-org <alias-or-username>`, `-o`              | Yes      | Authorized Marketing Cloud Next org alias or username. The flag value can be omitted because Salesforce CLI supplies the standard `target-org` configuration variable; fails with the standard no-default-org error when neither is available. String; not repeatable. |
 | `--segment <identifier>`, `-s`                        | Yes      | Segment API/developer name, exact display name, or 15/18-character `MarketSegment` record ID. String; not repeatable.                                                                                                     |
-| `--output-file <path>`                                | Yes      | Destination CSV or JSON file. Parent directories are created. Existing bytes are normally restored on failure; if restoration is impossible, the command fails with the exact sibling backup path retaining the original. |
+| `--output-file <path>`                                | No       | Explicit destination CSV or JSON file. Parent directories are created and existing bytes are normally restored on failure; exceptional restoration failure reports the exact sibling backup path. When omitted, a collision-safe absolute timestamped filename is generated in the current directory. |
 | `--result-format <format>`                            | No       | `csv` or `json`; default `csv`.                                                                                                                                                                                           |
+| `--column-headers <mode>`                             | No       | `label` or `api-name`; default `label`. Applies to enriched CSV headers and JSON keys; basic mode retains endpoint response keys.                                                                                        |
 | `--include-details`                                   | No       | Boolean; default `false`. Enables the details-only 19-field Unified Individual export through Data 360 Query API.                                                                                                         |
 | `--data-space <name>`                                 | No       | Accessible core `DataSpace.Name` used for enriched metadata/query requests; default `default`. Unknown or ambiguous names fail before Data 360 access or destination replacement.                                         |
 | `--fields <field-list>`                               | No       | Basic mode only: comma-separated SSOT storage fields, for example `Id__c,Delta_Type__c`; passed through to the endpoint.                                                                                                  |
