@@ -8,6 +8,10 @@ export const CMS_IMPORT_CAPABILITY = 'workspace.import.mapping' as const;
 export const CMS_IMPORT_CONTRACT = 'sf-cms-workspace-import' as const;
 export const CMS_REFERENCE_KIND = 'cms.content' as const;
 export const CMS_INFO_COMMAND = 'sf cms info' as const;
+export const CMS_REGISTRY_CONTRACT = 'sf-metadata-capability-v1' as const;
+export const CMS_REGISTRY_VERSION = '1.0.0' as const;
+export { METADATA_CAPABILITY_FIXTURE_SHA256 as CMS_REGISTRY_FIXTURE_SHA256 } from '../capabilities/contracts.js';
+import { METADATA_CAPABILITY_FIXTURE_SHA256 as CMS_REGISTRY_FIXTURE_SHA256 } from '../capabilities/contracts.js';
 export const CMS_EXPORT_COMMAND = 'sf cms export workspace' as const;
 export const CMS_IMPORT_COMMAND = 'sf cms import workspace' as const;
 
@@ -58,6 +62,31 @@ export type CmsInfoResult = {
   };
   capabilities: CmsCapability[];
 };
+
+export type CmsRegistryDeclaration = {
+  identity: { provider: typeof CMS_PLUGIN_NAME; family: 'cms'; type: string; profile: string };
+  providerContract: { name: typeof CMS_PLUGIN_NAME; minVersion: string; maxVersion: string };
+  nativeScope: { kind: string; root: string };
+  retrieval: CmsRegistryStrategy;
+  preflight: CmsRegistryStrategy;
+  operations: Array<'retrieve' | 'resolve'>;
+  dependencyExtractorVersion: string;
+};
+
+export type CmsRegistryStrategy = {
+  strategy: 'targeted' | 'batched' | 'filtered' | 'retrieve-all';
+  completionProof: string;
+  hardBounds: { maxCalls: number; maxItems: number; maxPages: number };
+};
+
+export type CmsRegistryResult = {
+  contract: typeof CMS_REGISTRY_CONTRACT;
+  version: typeof CMS_REGISTRY_VERSION;
+  fixtureSha256: typeof CMS_REGISTRY_FIXTURE_SHA256;
+  declarations: CmsRegistryDeclaration[];
+};
+
+export type CmsInfoResultV2 = CmsInfoResult & { registry: CmsRegistryResult };
 
 export type CmsExternalReferenceCorrelation = {
   sourceWorkspaceId: string;
@@ -190,6 +219,20 @@ export function validateCmsInfo(value: unknown): {
   };
 }
 
+/** Validate strict CMS metadata capability registry discovery. */
+export function validateCmsRegistryInfo(value: unknown): {
+  envelope: CmsEnvelope<CmsInfoResultV2>;
+  registry: CmsRegistryResult;
+} {
+  const envelope = validateEnvelope(value, 'cms.info', CMS_INFO_CONTRACT, validateInfoResultV2, 2);
+  if (envelope.provenance.command !== CMS_INFO_COMMAND) throw contractError('info command provenance');
+  if (envelope.status !== 'success' || envelope.result === null)
+    throw contractError('CMS registry unavailable or incompatible');
+  if (envelope.metadata.plugin.version !== envelope.result.plugin.version)
+    throw contractError('plugin version binding');
+  return { envelope, registry: envelope.result.registry };
+}
+
 /** Validate the frozen aggregate Marketing workspace export boundary. */
 export function validateCmsExport(value: unknown): CmsEnvelope<CmsExportResult> {
   const envelope = validateEnvelope(value, 'workspace.export.bulk', CMS_EXPORT_CONTRACT, validateExportResult);
@@ -267,7 +310,8 @@ function validateEnvelope<TResult>(
   value: unknown,
   operation: CmsOperation,
   contract: string,
-  resultValidator: (value: unknown) => TResult
+  resultValidator: (value: unknown) => TResult,
+  contractMajor = 1
 ): CmsEnvelope<TResult> {
   const record = strictRecord(
     value,
@@ -275,7 +319,7 @@ function validateEnvelope<TResult>(
     'envelope'
   );
   exact(record.contract, contract, 'contract');
-  versionMajor(record.contractVersion, 1, 'contractVersion');
+  versionMajor(record.contractVersion, contractMajor, 'contractVersion');
   const status = oneOf(record.status, ['success', 'partial', 'failed', 'blocked'] as const, 'status');
   const metadata = strictRecord(record.metadata, ['operation', 'plugin', 'apiVersion'], 'metadata');
   exact(metadata.operation, operation, 'operation');
@@ -329,7 +373,8 @@ function validateInfoResult(value: unknown): CmsInfoResult {
   );
   const exportCompatibility = validatedCompatibility['workspaceExportSet@1'];
   const importCompatibility = validatedCompatibility['workspaceImport@1'];
-  if (exportCompatibility === undefined || importCompatibility === undefined) throw contractError('compatibility fields');
+  if (exportCompatibility === undefined || importCompatibility === undefined)
+    throw contractError('compatibility fields');
   const correlations = stringArray(embeddedResults.externalReferenceCorrelations, 'correlation contracts');
   if (correlations.length !== 1 || correlations[0] !== CMS_CORRELATION_CONTRACT)
     throw contractError('correlation contract');
@@ -354,6 +399,107 @@ function validateInfoResult(value: unknown): CmsInfoResult {
       },
     },
     capabilities: array(record.capabilities, 'capabilities').map(validateCapability),
+  };
+}
+
+function validateInfoResultV2(value: unknown): CmsInfoResultV2 {
+  const record = strictRecord(value, ['plugin', 'api', 'contracts', 'capabilities', 'registry'], 'info v2 result');
+  const info = validateInfoResult({
+    plugin: record.plugin,
+    api: record.api,
+    contracts: record.contracts,
+    capabilities: record.capabilities,
+  });
+  const registryRecord = strictRecord(
+    record.registry,
+    ['contract', 'version', 'fixtureSha256', 'declarations'],
+    'registry'
+  );
+  exact(registryRecord.contract, CMS_REGISTRY_CONTRACT, 'registry contract');
+  exact(registryRecord.version, CMS_REGISTRY_VERSION, 'registry version');
+  exact(registryRecord.fixtureSha256, CMS_REGISTRY_FIXTURE_SHA256, 'registry fixture hash');
+  const declarations = array(registryRecord.declarations, 'registry declarations').map(validateRegistryDeclaration);
+  if (declarations.length === 0) throw contractError('registry declarations must not be empty');
+  requireUniqueCanonicalOrder(
+    declarations.map(
+      (entry) =>
+        `${entry.identity.provider}\0${entry.identity.family}\0${entry.identity.type}\0${entry.identity.profile}`
+    ),
+    'registry declarations'
+  );
+  return {
+    ...info,
+    registry: {
+      contract: CMS_REGISTRY_CONTRACT,
+      version: CMS_REGISTRY_VERSION,
+      fixtureSha256: CMS_REGISTRY_FIXTURE_SHA256,
+      declarations,
+    },
+  };
+}
+
+function validateRegistryDeclaration(value: unknown): CmsRegistryDeclaration {
+  const record = strictRecord(
+    value,
+    [
+      'identity',
+      'providerContract',
+      'nativeScope',
+      'retrieval',
+      'preflight',
+      'operations',
+      'dependencyExtractorVersion',
+    ],
+    'registry declaration'
+  );
+  const identity = strictRecord(record.identity, ['provider', 'family', 'type', 'profile'], 'registry identity');
+  exact(identity.provider, CMS_PLUGIN_NAME, 'registry provider');
+  exact(identity.family, 'cms', 'registry family');
+  const providerContract = strictRecord(
+    record.providerContract,
+    ['name', 'minVersion', 'maxVersion'],
+    'registry provider contract'
+  );
+  exact(providerContract.name, CMS_PLUGIN_NAME, 'registry provider contract name');
+  const nativeScope = strictRecord(record.nativeScope, ['kind', 'root'], 'registry native scope');
+  const operations = array(record.operations, 'registry operations').map((operation) =>
+    oneOf(operation, ['retrieve', 'resolve'] as const, 'registry operation')
+  );
+  if (operations.length === 0) throw contractError('registry operations must not be empty');
+  return {
+    identity: {
+      provider: CMS_PLUGIN_NAME,
+      family: 'cms',
+      type: nonempty(identity.type, 'registry type'),
+      profile: nonempty(identity.profile, 'registry profile'),
+    },
+    providerContract: {
+      name: CMS_PLUGIN_NAME,
+      minVersion: version(providerContract.minVersion, 'registry minimum provider version'),
+      maxVersion: version(providerContract.maxVersion, 'registry maximum provider version'),
+    },
+    nativeScope: {
+      kind: nonempty(nativeScope.kind, 'registry native scope kind'),
+      root: nonempty(nativeScope.root, 'registry native scope root'),
+    },
+    retrieval: validateRegistryStrategy(record.retrieval, 'registry retrieval'),
+    preflight: validateRegistryStrategy(record.preflight, 'registry preflight'),
+    operations,
+    dependencyExtractorVersion: nonempty(record.dependencyExtractorVersion, 'registry extractor version'),
+  };
+}
+
+function validateRegistryStrategy(value: unknown, label: string): CmsRegistryStrategy {
+  const record = strictRecord(value, ['strategy', 'completionProof', 'hardBounds'], label);
+  const hardBounds = strictRecord(record.hardBounds, ['maxCalls', 'maxItems', 'maxPages'], `${label} hard bounds`);
+  return {
+    strategy: oneOf(record.strategy, ['targeted', 'batched', 'filtered', 'retrieve-all'] as const, `${label} strategy`),
+    completionProof: nonempty(record.completionProof, `${label} completion proof`),
+    hardBounds: {
+      maxCalls: positiveInteger(hardBounds.maxCalls, `${label} maxCalls`),
+      maxItems: positiveInteger(hardBounds.maxItems, `${label} maxItems`),
+      maxPages: positiveInteger(hardBounds.maxPages, `${label} maxPages`),
+    },
   };
 }
 
@@ -478,7 +624,11 @@ function validateWorkspace(value: unknown): CmsExportWorkspace {
 }
 
 function validateImportResult(value: unknown): CmsImportResult {
-  const record = strictRecord(value, ['sourcePackage', 'target', 'integrity', 'mappings', 'references'], 'import result');
+  const record = strictRecord(
+    value,
+    ['sourcePackage', 'target', 'integrity', 'mappings', 'references'],
+    'import result'
+  );
   const sourcePackage = strictRecord(record.sourcePackage, ['manifestSha256', 'workspaceId'], 'source package');
   const target = strictRecord(record.target, ['orgId', 'workspaceId'], 'import target');
   const integrity = strictRecord(
@@ -518,7 +668,8 @@ function validateImportMapping(value: unknown): CmsImportMapping {
   exact(portableKey.scheme, 'cms-opaque-v1', 'portable key scheme');
   const status = oneOf(record.status, ['resolved', 'unresolved', 'ambiguous', 'failed'] as const, 'mapping status');
   const rewritten = boolean(record.cmsReferencesRewritten, 'CMS references rewritten');
-  if (status === 'resolved' && !rewritten) throw contractError('resolved mapping requires provider reference rewriting');
+  if (status === 'resolved' && !rewritten)
+    throw contractError('resolved mapping requires provider reference rewriting');
   return {
     referenceId: nonempty(record.referenceId, 'mapping referenceId'),
     kind: nonempty(record.kind, 'mapping kind'),
@@ -530,11 +681,7 @@ function validateImportMapping(value: unknown): CmsImportMapping {
       targetId: nonempty(target.targetId, 'mapping targetId'),
       targetReference: nonempty(target.targetReference, 'mapping targetReference'),
     },
-    operation: oneOf(
-      record.operation,
-      ['created', 'matched', 'updated', 'unchanged'] as const,
-      'mapping operation'
-    ),
+    operation: oneOf(record.operation, ['created', 'matched', 'updated', 'unchanged'] as const, 'mapping operation'),
     status,
     cmsReferencesRewritten: rewritten,
   };
@@ -687,6 +834,12 @@ function boolean(value: unknown, label: string): boolean {
 function integer(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0)
     throw contractError(`${label} must be a non-negative integer`);
+  return value as number;
+}
+
+function positiveInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) <= 0)
+    throw contractError(`${label} must be a positive integer`);
   return value as number;
 }
 

@@ -9,12 +9,14 @@ import {
   assertCmsCliInvocation,
   buildCmsExportArgs,
   CMS_INFO_ARGS,
+  CMS_REGISTRY_INFO_ARGS,
   CmsCliError,
   resolveCmsCliInvocation,
   runCmsExport,
   runCmsInfo,
+  runCmsRegistryInfo,
 } from '../../src/cms/cmsCli.js';
-import { cloneFixture, validExportFixture, validInfoFixture } from './contractFixtures.js';
+import { cloneFixture, validExportFixture, validInfoFixture, validRegistryInfoFixture } from './contractFixtures.js';
 
 type SpawnCall = { executable: string; args: string[]; options: Parameters<typeof spawn>[2] };
 
@@ -214,6 +216,33 @@ describe('CMS read-only CLI boundary', () => {
     expect(() => resolveCmsCliInvocation({ platform: 'win32', env: { PATH: '' } })).to.throw(
       CmsCliError,
       'could not resolve a safe Salesforce CLI Node entrypoint'
+    );
+  });
+
+  it('requests v2 only for registry discovery while retaining v1 orchestration', async () => {
+    const calls: SpawnCall[] = [];
+    const result = await runCmsRegistryInfo({
+      platform: 'linux',
+      spawn: mockSpawner({ stdout: JSON.stringify(validRegistryInfoFixture) }, calls),
+    });
+    expect(calls[0].args).to.deep.equal([...CMS_REGISTRY_INFO_ARGS]);
+    expect(result.registry.declarations.map((entry) => entry.identity.type)).to.deep.equal(['Email']);
+    expect(CMS_INFO_ARGS).to.deep.equal(['cms', 'info', '--contract-version', '1', '--json']);
+    expect(buildCmsExportArgs('source', 'out')).to.include.members(['--contract-version', '1']);
+  });
+
+  it('fails closed when v2 registry discovery is unsupported', async () => {
+    const blocked = cloneFixture(validRegistryInfoFixture) as unknown as {
+      status: string;
+      result: unknown;
+      diagnostics: { errors: unknown[] };
+    };
+    blocked.status = 'blocked';
+    blocked.result = null;
+    blocked.diagnostics.errors = [{ code: 'UNSUPPORTED_CONTRACT_VERSION', message: 'unsupported', retryable: false }];
+    await rejects(
+      runCmsRegistryInfo({ spawn: mockSpawner({ stdout: JSON.stringify(blocked), exitCode: 1 }, []) }),
+      'registry unavailable or incompatible'
     );
   });
 

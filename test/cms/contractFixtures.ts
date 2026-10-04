@@ -1,3 +1,4 @@
+import { CMS_REGISTRY_FIXTURE_SHA256 } from '../../src/cms/contracts.js';
 import type { CmsEnvelope, CmsExportResult, CmsInfoResult } from '../../src/cms/contracts.js';
 
 export const fixtureProvenance = {
@@ -113,6 +114,38 @@ export const publishedInfoFixture: CmsEnvelope<CmsInfoResult> = {
     ],
   },
 };
+
+export const validRegistryInfoFixture = {
+  ...cloneFixture(validInfoFixture),
+  contractVersion: '2.0.0',
+  result: {
+    ...cloneFixture(validInfoFixture.result!),
+    registry: {
+      contract: 'sf-metadata-capability-v1',
+      version: '1.0.0',
+      fixtureSha256: CMS_REGISTRY_FIXTURE_SHA256,
+      declarations: [
+        {
+          dependencyExtractorVersion: 'cms-email-dependencies@1',
+          identity: { provider: 'sf-plugin-cms', family: 'cms', type: 'Email', profile: 'dependency-free' },
+          nativeScope: { kind: 'marketing-workspace', root: 'email' },
+          operations: ['retrieve'],
+          preflight: {
+            completionProof: 'exact workspace, API-name, and language match',
+            hardBounds: { maxCalls: 5, maxItems: 1, maxPages: 1 },
+            strategy: 'targeted',
+          },
+          providerContract: { maxVersion: '0.9.999', minVersion: '0.9.0', name: 'sf-plugin-cms' },
+          retrieval: {
+            completionProof: 'complete bounded family inventory',
+            hardBounds: { maxCalls: 20, maxItems: 500, maxPages: 10 },
+            strategy: 'filtered',
+          },
+        },
+      ],
+    },
+  },
+} as const;
 
 export const validExportFixture: CmsEnvelope<CmsExportResult> = {
   contract: 'sf-cms-workspace-export-set',

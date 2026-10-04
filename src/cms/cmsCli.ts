@@ -5,19 +5,22 @@ import {
   validateCmsExport,
   validateCmsImport,
   validateCmsInfo,
+  validateCmsRegistryInfo,
   validateCmsStatusExit,
   type CmsEnvelope,
   type CmsExportResult,
   type CmsImportResult,
   type CmsInfoResult,
+  type CmsInfoResultV2,
 } from './contracts.js';
 
 export const CMS_INFO_ARGS = ['cms', 'info', '--contract-version', '1', '--json'] as const;
+export const CMS_REGISTRY_INFO_ARGS = ['cms', 'info', '--contract-version', '2', '--json'] as const;
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_OUTPUT_LIMIT = 1_048_576;
 const REMOVED_ENVIRONMENT_VARIABLES = ['NODE_OPTIONS', 'NODE_PATH', 'OCLIF_DEV', 'OCLIF_TS_NODE'] as const;
 
-type CmsCliOperation = 'info' | 'export' | 'import-dry-run' | 'import-apply';
+type CmsCliOperation = 'info' | 'registry-info' | 'export' | 'import-dry-run' | 'import-apply';
 type ProcessSpawner = typeof spawn;
 
 type CmsCliInvocation = {
@@ -102,6 +105,19 @@ export async function runCmsInfo(options: CmsCliOptions = {}): Promise<ReturnTyp
   }
 }
 
+/** Run the allowlisted read-only CMS registry discovery command. */
+export async function runCmsRegistryInfo(
+  options: CmsCliOptions = {}
+): Promise<ReturnType<typeof validateCmsRegistryInfo>> {
+  const processResult = await runAllowlistedCmsCommand('registry-info', CMS_REGISTRY_INFO_ARGS, options);
+  try {
+    validateCmsStatusExit(processResult.value.status, processResult.exitCode);
+    return validateCmsRegistryInfo(processResult.value);
+  } catch (error) {
+    throw cliError('registry unavailable or incompatible', error);
+  }
+}
+
 /** Run the allowlisted read-only aggregate CMS export command. */
 export async function runCmsImport(
   input: { targetOrg: string; targetWorkspaceId: string; sourceDirectory: string; reportDirectory?: string },
@@ -141,7 +157,10 @@ async function runAllowlistedCmsCommand(
   operation: CmsCliOperation,
   args: readonly string[],
   options: CmsCliOptions
-): Promise<{ value: CmsEnvelope<CmsInfoResult | CmsExportResult | CmsImportResult>; exitCode: number }> {
+): Promise<{
+  value: CmsEnvelope<CmsInfoResult | CmsInfoResultV2 | CmsExportResult | CmsImportResult>;
+  exitCode: number;
+}> {
   assertCmsCliInvocation(operation, args);
   const invocation = resolveCmsCliInvocation(options);
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -242,6 +261,7 @@ export function resolveCmsCliInvocation(options: CmsCliOptions = {}): CmsCliInvo
 export function assertCmsCliInvocation(operation: CmsCliOperation, args: readonly string[]): void {
   let expected: readonly string[];
   if (operation === 'info') expected = CMS_INFO_ARGS;
+  else if (operation === 'registry-info') expected = CMS_REGISTRY_INFO_ARGS;
   else if (operation === 'export') expected = buildCmsExportArgs(args[4] ?? '', args[9] ?? '');
   else {
     const apply = operation === 'import-apply';
@@ -263,11 +283,11 @@ export function assertCmsCliInvocation(operation: CmsCliOperation, args: readonl
 function parseExactlyOneJson(
   stdout: string,
   stderr: string
-): CmsEnvelope<CmsInfoResult | CmsExportResult | CmsImportResult> {
+): CmsEnvelope<CmsInfoResult | CmsInfoResultV2 | CmsExportResult | CmsImportResult> {
   const framed = stdout.trim();
   if (framed.length === 0) throw new CmsCliError(`CMS CLI returned no JSON; stderr=${redact(stderr)}`);
   try {
-    return JSON.parse(framed) as CmsEnvelope<CmsInfoResult | CmsExportResult>;
+    return JSON.parse(framed) as CmsEnvelope<CmsInfoResult | CmsInfoResultV2 | CmsExportResult | CmsImportResult>;
   } catch (error) {
     throw cliError('returned malformed or multiple JSON values', error, `${stdout}\n${stderr}`);
   }

@@ -1,9 +1,11 @@
 import { expect } from 'chai';
 import {
+  CMS_REGISTRY_FIXTURE_SHA256,
   CmsContractError,
   resolveCmsCorrelation,
   validateCmsExport,
   validateCmsInfo,
+  validateCmsRegistryInfo,
   validateCmsStatusExit,
 } from '../../src/cms/contracts.js';
 import {
@@ -13,6 +15,7 @@ import {
   publishedInfoFixture,
   validExportFixture,
   validInfoFixture,
+  validRegistryInfoFixture,
 } from './contractFixtures.js';
 
 function rejects(action: () => unknown, detail: string): void {
@@ -79,6 +82,38 @@ describe('CMS public contract boundary', () => {
     const drift = cloneFixture(validInfoFixture);
     drift.contractVersion = '2.0.0';
     rejects(() => validateCmsInfo(drift), 'major is unsupported');
+  });
+
+  it('strictly validates CMS-only v2 registry discovery and fails closed', () => {
+    const validated = validateCmsRegistryInfo(validRegistryInfoFixture);
+    expect(validated.registry).to.deep.include({
+      contract: 'sf-metadata-capability-v1',
+      version: '1.0.0',
+      fixtureSha256: CMS_REGISTRY_FIXTURE_SHA256,
+    });
+    expect(validated.registry.declarations.map((entry) => entry.identity.type)).to.deep.equal(['Email']);
+
+    const wrongProvider = cloneFixture(validRegistryInfoFixture) as unknown as {
+      result: { registry: { declarations: Array<{ identity: { provider: string } }> } };
+    };
+    wrongProvider.result.registry.declarations[0].identity.provider = 'sf-plugin-mcnext';
+    rejects(() => validateCmsRegistryInfo(wrongProvider), 'registry provider');
+
+    const unavailable = cloneFixture(validRegistryInfoFixture) as unknown as {
+      status: string;
+      result: unknown;
+      diagnostics: { errors: unknown[] };
+    };
+    unavailable.status = 'blocked';
+    unavailable.result = null;
+    unavailable.diagnostics.errors = [
+      { code: 'UNSUPPORTED_CONTRACT_VERSION', message: 'unsupported', retryable: false },
+    ];
+    rejects(() => validateCmsRegistryInfo(unavailable), 'registry unavailable or incompatible');
+
+    const v1WithRows = cloneFixture(validInfoFixture) as unknown as { result: Record<string, unknown> };
+    v1WithRows.result.registry = validRegistryInfoFixture.result.registry;
+    rejects(() => validateCmsInfo(v1WithRows), 'info result fields');
   });
 
   it('accepts the exact five-field correlation row and preserves the opaque source value', () => {
