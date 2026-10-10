@@ -16,7 +16,16 @@ import {
   runCmsInfo,
   runCmsRegistryInfo,
 } from '../../src/cms/cmsCli.js';
-import { cloneFixture, validExportFixture, validInfoFixture, validRegistryInfoFixture } from './contractFixtures.js';
+import {
+  cloneFixture,
+  currentRegistryInfoFixture,
+  partialFailedExportFixture,
+  failedExportFixture,
+  blockedExportFixture,
+  validExportFixture,
+  validInfoFixture,
+  validRegistryInfoFixture,
+} from './contractFixtures.js';
 
 type SpawnCall = { executable: string; args: string[]; options: Parameters<typeof spawn>[2] };
 
@@ -81,6 +90,61 @@ async function rejects(promise: Promise<unknown>, detail: string): Promise<void>
 }
 
 describe('CMS read-only CLI boundary', () => {
+  it('passes current lifecycle discovery and failed-null export evidence through unchanged', async () => {
+    const info = await runCmsRegistryInfo({
+      platform: 'linux',
+      spawn: mockSpawner({ stdout: JSON.stringify(currentRegistryInfoFixture) }, []),
+    });
+    expect(info.envelope.result).to.deep.equal(currentRegistryInfoFixture.result);
+    await Promise.all(
+      (
+        [
+          [partialFailedExportFixture, 2],
+          [failedExportFixture, 1],
+          [blockedExportFixture, 1],
+        ] as const
+      ).map(async ([fixture, exitCode]) => {
+        // eslint-disable-next-line no-await-in-loop -- independently verify each terminal status and exit pair
+        const result = await runCmsExport('source', 'out', {
+          platform: 'linux',
+          spawn: mockSpawner({ stdout: JSON.stringify(fixture), exitCode }, []),
+        });
+        expect(result).to.deep.equal(fixture);
+      })
+    );
+    await rejects(
+      runCmsExport('source', 'out', {
+        platform: 'linux',
+        spawn: mockSpawner({ stdout: JSON.stringify(failedExportFixture), exitCode: 0 }, []),
+      }),
+      'status failed requires exit 1'
+    );
+  });
+
+  it('rejects actual outer preflight error shapes without inventing a CMS envelope', async () => {
+    await Promise.all(
+      ['Workspace classification is missing.', 'Workspace enumeration made no progress.'].map(async (message) => {
+        const outer = {
+          status: 1,
+          name: 'Error',
+          message,
+          exitCode: 1,
+          actions: [],
+          context: 'ExportWorkspace',
+          stack: 'Error',
+          warnings: [],
+        };
+        // eslint-disable-next-line no-await-in-loop -- independently verify both provider preflight failures
+        await rejects(
+          runCmsExport('source', 'out', {
+            platform: 'linux',
+            spawn: mockSpawner({ stdout: JSON.stringify(outer), exitCode: 1 }, []),
+          }),
+          'envelope fields'
+        );
+      })
+    );
+  });
   it('uses exact info argv, shell false, and a minimally sanitized inherited environment', async () => {
     const calls: SpawnCall[] = [];
     const env = {

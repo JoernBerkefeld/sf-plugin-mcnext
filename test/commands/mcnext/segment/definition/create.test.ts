@@ -1,11 +1,18 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type Org } from '@salesforce/core';
 import { expect } from 'chai';
 import SegmentDefinitionCreate, {
   segmentDefinitionCreateServices,
 } from '../../../../../src/commands/mcnext/segment/definition/create.js';
+
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+  type RunOwnedTemp,
+} from '../../../../../src/filesystem/runOwnedTemp.js';
 
 const sourceOrgId = '00D000000000000AAA';
 const targetOrgId = '00D000000000001AAA';
@@ -37,17 +44,29 @@ describe('mcnext segment definition create command', () => {
   const originalCreateOrg = segmentDefinitionCreateServices.createOrg;
   const originalCreateConnect = segmentDefinitionCreateServices.createConnect;
   const originalCore = segmentDefinitionCreateServices.core;
+  let run: RunOwnedTemp;
   let directory: string;
+  let sentinel: string;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'mcnext-segment-create-command-'));
+    run = await createRunOwnedTemp('mcnext-segment-create-command');
+    directory = await createRunOwnedDirectory(run, 'project');
+    sentinel = join(run.root, 'sibling-sentinel.txt');
+    await writeFile(sentinel, 'keep', 'utf8');
   });
 
   afterEach(async () => {
     segmentDefinitionCreateServices.createOrg = originalCreateOrg;
     segmentDefinitionCreateServices.createConnect = originalCreateConnect;
     segmentDefinitionCreateServices.core = originalCore;
-    await rm(directory, { recursive: true, force: true });
+    await removeRunOwnedPath(run, directory);
+    const childError = await stat(directory).catch((error: NodeJS.ErrnoException) => error);
+    expect(childError).to.have.property('code', 'ENOENT');
+    expect(await readFile(sentinel, 'utf8')).to.equal('keep');
+    await unlink(sentinel);
+    await removeRunOwnedRoot(run);
+    const rootError = await stat(run.root).catch((error: NodeJS.ErrnoException) => error);
+    expect(rootError).to.have.property('code', 'ENOENT');
   });
 
   it('requires explicit aliases, identities, project source, member and mapping', () => {

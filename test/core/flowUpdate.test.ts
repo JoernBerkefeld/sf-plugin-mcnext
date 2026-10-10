@@ -1,7 +1,12 @@
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { mkdir, writeFile, readFile, stat } from 'node:fs/promises';
+import { dirname, join, basename } from 'node:path';
 import { expect } from 'chai';
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+} from '../../src/filesystem/runOwnedTemp.js';
 import { updateFlow } from '../../src/core/flowCreate.js';
 import { type CoreRunner } from '../../src/core/flowCli.js';
 
@@ -69,8 +74,10 @@ describe('explicit inactive Flow UPDATE', () => {
     'missing-ids',
   ] as const) {
     it(`handles ${scenario} without fallback, rename or activation`, async () => {
-      const root = await mkdtemp(join(tmpdir(), 'flow-update-test-'));
+      const run = await createRunOwnedTemp('flow-update-test');
+      const root = await createRunOwnedDirectory(run, 'project');
       const calls: string[][] = [];
+      const scratchProjects = new Set<string>();
       const info = { problemType: 'Info', problem: 'Draft prerequisites remain' };
       try {
         await mkdir(join(root, 'custom'));
@@ -132,7 +139,8 @@ describe('explicit inactive Flow UPDATE', () => {
                 {
                   Id: queriedVersion,
                   Status:
-                    scenario === 'active-version' || (scenario === 'replacement-active' && queriedVersion === replacementVersion)
+                    scenario === 'active-version' ||
+                    (scenario === 'replacement-active' && queriedVersion === replacementVersion)
                       ? 'Active'
                       : 'InvalidDraft',
                   LastModifiedDate: scenario === 'changed-baseline' && checks === 2 ? 'changed' : 'baseline',
@@ -142,6 +150,9 @@ describe('explicit inactive Flow UPDATE', () => {
             return response({ records, totalSize: records.length, done: true });
           }
           expect(cwd).not.to.equal(root);
+          expect(basename(cwd)).to.equal('project');
+          expect((await stat(join(dirname(cwd), '.sf-mcnext-run-owner.json'))).isFile()).to.equal(true);
+          scratchProjects.add(cwd);
           const flowPath = join(cwd, 'custom/main/default/flows', `${member}.flow-meta.xml`);
           if (args[1] !== 'retrieve') expect(await readFile(flowPath, 'utf8')).to.equal(submittedSource);
           expect(args).to.include(`Flow:${member}`).and.not.to.include('--activate');
@@ -226,6 +237,15 @@ describe('explicit inactive Flow UPDATE', () => {
         } catch (caught) {
           error = caught;
         }
+        await Promise.all(
+          [...scratchProjects].map(async (cwd) => {
+            for (const path of [cwd, dirname(cwd)]) {
+              // eslint-disable-next-line no-await-in-loop -- verify both owned child and nonrecursive root cleanup
+              const metadata = await stat(path).catch((caught: NodeJS.ErrnoException) => caught.code);
+              expect(metadata).to.equal('ENOENT');
+            }
+          })
+        );
         const apply = calls.filter(
           (args) => args[0] === 'project' && args[1] === 'deploy' && !args.includes('--dry-run')
         );
@@ -255,7 +275,8 @@ describe('explicit inactive Flow UPDATE', () => {
           );
         }
       } finally {
-        await rm(root, { recursive: true, force: true });
+        await removeRunOwnedPath(run, root);
+        await removeRunOwnedRoot(run);
       }
     });
   }

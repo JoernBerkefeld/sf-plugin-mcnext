@@ -1,8 +1,14 @@
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { lstat, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect } from 'chai';
 import { buildFlowArgs, parseFlowResult, runFlow, type FlowSelection } from '../../src/core/flowCli.js';
+import {
+  createRunOwnedDirectory,
+  createRunOwnedTemp,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+} from '../../src/filesystem/runOwnedTemp.js';
 
 const selection: FlowSelection = {
   projectRoot: '.',
@@ -54,6 +60,26 @@ describe('Core Flow selection boundary', () => {
     expect(() => buildFlowArgs({ ...selection, targetOrg: '' })).to.throw();
     expect(() => buildFlowArgs({ ...selection, waitMinutes: 0 })).to.throw();
     expect(() => buildFlowArgs({ ...selection, operation: 'deploy' as 'retrieve' })).to.throw('Unsupported');
+  });
+
+  it('forwards only explicitly supplied valid API versions without changing omitted-version arguments', () => {
+    const original = buildFlowArgs(selection);
+    expect(original).not.to.include('--api-version');
+    for (const apiVersion of ['67.0', '100.0']) {
+      for (const operation of ['retrieve', 'validate'] as const) {
+        const args = buildFlowArgs({ ...selection, operation, apiVersion });
+        const index = args.indexOf('--api-version');
+        expect(index).to.be.greaterThan(-1);
+        expect(args[index + 1]).to.equal(apiVersion);
+        expect(args.filter((arg) => arg === '--api-version')).to.have.length(1);
+        expect(args.filter((_, position) => position !== index && position !== index + 1)).to.deep.equal(
+          buildFlowArgs({ ...selection, operation })
+        );
+      }
+    }
+    for (const apiVersion of ['', '7.0', '1000.0', '67', '67.1', ' 67.0', '67.0\n', '--json', '67.0\0']) {
+      expect(() => buildFlowArgs({ ...selection, apiVersion })).to.throw('Flow API version');
+    }
   });
 
   it('requires completed successful jobs and selected artifact paths', () => {
@@ -135,15 +161,19 @@ describe('Core Flow selection boundary', () => {
   });
 
   it('runs from the configured project root, leaving multi-package paths to Core', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'flow-cli-'));
+    const run = await createRunOwnedTemp('flow-cli');
+    const root = await createRunOwnedDirectory(run, 'project');
+    const sentinel = join(run.root, 'sentinel.txt');
+    await writeFile(sentinel, 'preserve sibling', { flag: 'wx' });
     try {
       await writeFile(
         join(root, 'sfdx-project.json'),
         JSON.stringify({ packageDirectories: [{ path: 'custom', default: true }, { path: 'other' }] })
       );
       let calls = 0;
-      const result = await runFlow({ ...selection, projectRoot: root }, async (args, cwd) => {
+      const result = await runFlow({ ...selection, projectRoot: root, apiVersion: '67.0' }, async (args, cwd) => {
         calls++;
+        expect(args[args.indexOf('--api-version') + 1]).to.equal('67.0');
         expect(cwd).to.equal(root);
         expect(args).not.to.include('force-app').and.not.to.include('--output-dir');
         return Promise.resolve(response(success));
@@ -163,7 +193,13 @@ describe('Core Flow selection boundary', () => {
       expect(rejected).to.equal(true);
       expect(calls).to.equal(1);
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await removeRunOwnedPath(run, root);
+      expect(existsSync(root)).to.equal(false);
+      expect((await lstat(run.root)).isDirectory()).to.equal(true);
+      expect(await readFile(sentinel, 'utf8')).to.equal('preserve sibling');
+      await unlink(sentinel);
+      await removeRunOwnedRoot(run);
+      expect(existsSync(run.root)).to.equal(false);
     }
   });
 });

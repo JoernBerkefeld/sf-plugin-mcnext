@@ -1,0 +1,13 @@
+{
+  "identity": {
+    "family": "cms",
+    "type": "Image",
+    "apiName": "Autumn_Banner",
+    "context": { "workspaceApiName": "Demo_Workspace" }
+  },
+  "contentType": "sfdc_cms__image",
+  "title": "Autumn Banner",
+  "language": "en_US",
+  "folderPath": [],
+  "companions": { "media": "Autumn_Banner.cms-image.svg" }
+}

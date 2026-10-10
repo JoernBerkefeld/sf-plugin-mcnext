@@ -1,0 +1,109 @@
+{
+  "scenario": "imaginary-retrieve-all-result",
+  "provenance": "synthetic-authored-not-retrieved",
+  "importReady": false,
+  "scope": "Representative synthetic default-language project; not a complete Marketing catalog, schema snapshot, relationship mapping, or qualified export.",
+  "gaps": [
+    "Retrieve-all orchestration and actual multi-provider download integration are not implemented.",
+    "Portable CMS Email source reflects the local 0.9.0 candidate; the declared ^0.6.1 dependency does not establish that contract.",
+    "CMS Image source and companion integration remain proposed, not qualified by the current MCNext source profile.",
+    "Data 360 vendor output contract and adapter are unresolved; no vendor output is fabricated in the demo.",
+    "Campaign flat JSON is a proposed shape only: readable-schema completeness, permission/API omissions, Flow/Segment relationships and destination behavior remain unverified. Null values illustrate empty fields, not evidence of verified absence.",
+    "Synthetic source lacks retrieved baselines, source evidence, target mappings, and deployment qualification. Inventory references are scenario associations only."
+  ],
+  "unresolvedProviders": [
+    {
+      "provider": "data360-vendor-unresolved",
+      "command": null,
+      "outputSchema": null,
+      "intendedComponents": [
+        "Autumn_Audience segment definition",
+        "Unified Individual data model prerequisite",
+        "Autumn_Profile data graph prerequisite"
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "sfdx-project.json",
+      "kind": "project",
+      "workflowOwner": "mcnext",
+      "transportOwner": "core-sf",
+      "formatStatus": "existing-shape",
+      "layoutStatus": "existing-layout",
+      "evidence": "Salesforce source project packageDirectories",
+      "companions": [],
+      "references": []
+    },
+    {
+      "path": "force-app/main/default/flows/Autumn_Welcome.flow-meta.xml",
+      "kind": "flow",
+      "workflowOwner": "mcnext",
+      "transportOwner": "core-sf",
+      "formatStatus": "existing-shape",
+      "layoutStatus": "existing-layout",
+      "evidence": "Native Metadata API Flow source transport, MCNext selection and inactive workflow policy",
+      "companions": [],
+      "references": [
+        "mcnext/campaigns/Autumn_Promo.mcn-campaign.json",
+        "cms/Demo_Workspace/email/Autumn_Welcome.cms-email.json",
+        "mcnext/segment-data/Autumn_Audience.mcn-segment-members.csv"
+      ]
+    },
+    {
+      "path": "mcnext/campaigns/Autumn_Promo.mcn-campaign.json",
+      "kind": "campaign",
+      "workflowOwner": "mcnext",
+      "transportOwner": "core-sf",
+      "formatStatus": "proposed-shape",
+      "layoutStatus": "proposed-layout",
+      "evidence": "Proposed flat Campaign snapshot with canonical Id; NOT the current runtime CampaignArtifact contract or a complete readable-schema export",
+      "companions": [],
+      "references": ["force-app/main/default/flows/Autumn_Welcome.flow-meta.xml"]
+    },
+    {
+      "path": "mcnext/segment-data/Autumn_Audience.mcn-segment-members.csv",
+      "kind": "segment-members",
+      "workflowOwner": "mcnext",
+      "transportOwner": "mcnext",
+      "formatStatus": "existing-shape",
+      "layoutStatus": "proposed-layout",
+      "evidence": "Basic member endpoint response keys, opaque membership id; not a deployable segment definition",
+      "companions": [],
+      "references": ["mcnext/segment-data/MarketSegment.mcn-segment-records.csv"]
+    },
+    {
+      "path": "mcnext/segment-data/MarketSegment.mcn-segment-records.csv",
+      "kind": "segment-records",
+      "workflowOwner": "mcnext",
+      "transportOwner": "core-sf",
+      "formatStatus": "existing-shape",
+      "layoutStatus": "proposed-layout",
+      "evidence": "Core bulk-export projection and core-owned CSV transport; not a deployable segment definition",
+      "companions": [],
+      "references": ["mcnext/segment-data/Autumn_Audience.mcn-segment-members.csv"]
+    },
+    {
+      "path": "cms/Demo_Workspace/email/Autumn_Welcome.cms-email.json",
+      "kind": "cms-email",
+      "workflowOwner": "mcnext",
+      "transportOwner": "sf-plugin-cms",
+      "formatStatus": "local-candidate-shape",
+      "layoutStatus": "local-candidate-layout",
+      "evidence": "Public sf-cms-source-definition@1 contract: flat default-language Email JSON/HTML; no provider admission claimed",
+      "companions": ["cms/Demo_Workspace/email/Autumn_Welcome.cms-email.html"],
+      "references": ["cms/Demo_Workspace/image/Autumn_Banner.cms-image.json"]
+    },
+    {
+      "path": "cms/Demo_Workspace/image/Autumn_Banner.cms-image.json",
+      "kind": "proposed-cms-image",
+      "workflowOwner": "mcnext",
+      "transportOwner": "sf-plugin-cms",
+      "formatStatus": "proposed-shape",
+      "layoutStatus": "proposed-layout",
+      "evidence": "Illustrative source/media companion only; no current portable Image contract or MCNext qualification claimed",
+      "companions": ["cms/Demo_Workspace/image/Autumn_Banner.cms-image.svg"],
+      "references": []
+    }
+  ]
+}

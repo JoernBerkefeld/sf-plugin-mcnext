@@ -1,9 +1,15 @@
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { lstat, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect } from 'chai';
 import { runCampaign, type CampaignSelection } from '../../src/core/campaignCli.js';
 import { type CoreRunner } from '../../src/core/flowCli.js';
+import {
+  createRunOwnedDirectory,
+  createRunOwnedTemp,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+} from '../../src/filesystem/runOwnedTemp.js';
 
 const id = '701000000000001AAA';
 const sourceId = '701000000000002AAA';
@@ -101,24 +107,357 @@ describe('Campaign bounded Core configuration adapter', () => {
       })
     );
   });
-  it('exports only supported scalar configuration and rejects relationships', async () => {
+  it('exports a describe-driven flat 79-field snapshot plus a custom field without losing values', async () => {
     const s = { ...selection, operation: 'export' as const, artifact: undefined, expectedName: undefined };
+    const snapshot = {
+      ...record,
+      ...Object.fromEntries(Array.from({ length: 61 }, (_, i) => [`Readable${i}__c`, i])),
+      Description: null,
+      Name: '',
+      ParentId: sourceId,
+      BriefId: '0gb000000000001AAA',
+      CampaignImageId: '069000000000001AAA',
+      ActualCost: 0,
+      ['ExtraCustom__c']: {
+        nested: [null, '', false, 0, {}, [], { label: 'keep', child: { value: 0 } }, [{ active: false }]],
+        object: { text: '', nullable: null, empty: {}, list: [] },
+      },
+    };
+    expect(Object.keys(snapshot)).to.have.length(80);
+    const schema = {
+      name: 'Campaign',
+      queryable: true,
+      fields: Object.keys(snapshot)
+        .reverse()
+        .map((name) => ({ name, type: 'string' })),
+    };
+    const calls: string[][] = [];
     const exported = await runCampaign(
       s,
-      transport([rows([{ Id: org }]), { ...record, Description: null, NumberSent: 3 }], [])
+      transport(
+        [
+          rows([{ Id: org }]),
+          schema,
+          {
+            attributes: { type: 'Campaign' },
+            ...snapshot,
+            ['Undescribed__c']: 'exclude',
+            ['ExtraCustom__c']: {
+              attributes: { type: 'Compound' },
+              nested: [
+                null,
+                '',
+                false,
+                0,
+                { attributes: { type: 'Empty' } },
+                [],
+                {
+                  attributes: { type: 'ArrayElement' },
+                  label: 'keep',
+                  child: { attributes: { type: 'Child' }, value: 0 },
+                },
+                [{ attributes: { type: 'NestedArrayElement' }, active: false }],
+              ],
+              object: {
+                attributes: { type: 'Object' },
+                text: '',
+                nullable: null,
+                empty: { attributes: { type: 'Empty' } },
+                list: [],
+              },
+            },
+          },
+        ],
+        calls
+      )
     );
-    expect(exported.artifact.fields).to.deep.equal({
-      Name: record.Name,
-      Type: 'Email',
-      Status: 'Planned',
-      IsActive: false,
+    expect(exported.artifact).to.deep.equal(snapshot);
+    expect(exported.artifact).not.to.have.property('sourceId');
+    expect(exported.artifact).not.to.have.property('fields');
+    expect(exported.artifact).not.to.have.property('attributes');
+    expect(Object.keys(exported.artifact)).to.deep.equal([
+      'Id',
+      ...Object.keys(snapshot)
+        .filter((name) => name !== 'Id')
+        .sort(),
+    ]);
+    expect(exported.operation).to.equal('export');
+    if (exported.operation !== 'export') throw new Error('Expected export');
+    expect(exported.diagnostics.snapshot).to.equal('complete');
+    expect(exported.diagnostics.omittedFields).to.deep.equal([]);
+    expect(exported.diagnostics.associatedArtifacts.status).to.equal('blocked');
+    expect(calls.map((args) => args.slice(0, 2))).to.deep.equal([
+      ['data', 'query'],
+      ['sobject', 'describe'],
+      ['data', 'get'],
+    ]);
+    expect(
+      await rejects({ ...selection, artifact: snapshot as unknown as CampaignSelection['artifact'] }, [], 'nonempty')
+    ).to.have.length(0);
+  });
+  it('distinguishes omitted readable fields from present null and empty values', async () => {
+    const s = { ...selection, operation: 'export' as const, artifact: undefined, expectedName: undefined };
+    const schema = {
+      name: 'Campaign',
+      queryable: true,
+      fields: ['Id', 'Description', 'Name', 'PermissionField__c', 'NewApiField__c'].map((name) => ({
+        name,
+        type: 'string',
+      })),
+    };
+    const exported = await runCampaign(
+      s,
+      transport(
+        [rows([{ Id: org }]), schema, { Id: id, Description: null, Name: '', ['Unavailable__c']: 'not described' }],
+        []
+      )
+    );
+    expect(exported.artifact).to.deep.equal({ Id: id, Description: null, Name: '' });
+    if (exported.operation !== 'export') throw new Error('Expected export');
+    expect(exported.diagnostics.snapshot).to.equal('incomplete');
+    expect(exported.diagnostics.omittedFields).to.deep.equal(['NewApiField__c', 'PermissionField__c']);
+  });
+  it('blocks invalid export schema and canonical identity before publishing a snapshot', async () => {
+    const s = { ...selection, operation: 'export' as const, artifact: undefined, expectedName: undefined };
+    const schema = { name: 'Campaign', queryable: true, fields: [{ name: 'Id', type: 'id' }] };
+    await Promise.all(
+      [
+        {},
+        { ...schema, name: 'Account' },
+        { ...schema, queryable: false },
+        { ...schema, fields: [] },
+        { ...schema, fields: [{ name: 'Name', type: 'string' }] },
+        { ...schema, fields: [schema.fields[0], schema.fields[0]] },
+        { ...schema, fields: [{ name: 'Id FROM Account', type: 'id' }] },
+        { ...schema, fields: [{ name: 'Id' }] },
+      ].map(async (bad) => {
+        expect(await rejects(s, [rows([{ Id: org }]), bad], 'schema')).to.have.length(2);
+      })
+    );
+    await Promise.all(
+      [{}, { Id: sourceId }, { Id: id.slice(0, 15) }].map(async (bad) =>
+        rejects(s, [rows([{ Id: org }]), schema, bad], 'canonical identity')
+      )
+    );
+    await rejects(s, [rows([{ Id: org }]), schema, []], 'malformed');
+    await rejects(s, [{ records: [{ Id: org }], totalSize: 2, done: false }], 'Incomplete');
+  });
+  it('discovers zero and multiple flows with independent segments and distinct core/Tooling versions', async () => {
+    const flowSchema = (name: string, names: string[]): unknown => ({
+      name,
+      queryable: true,
+      fields: names.map((field) => ({ name: field, type: 'string' })),
     });
-    await rejects(s, [rows([{ Id: org }]), { ...record, ParentId: sourceId }], 'relationships');
-    await rejects(s, [rows([{ Id: org }]), {}], 'malformed');
-    await rejects(s, [rows([{ Id: org }]), { ...record, IsActive: 'false' }], 'malformed');
+    const schema = {
+      name: 'Campaign',
+      queryable: true,
+      fields: [{ name: 'Id', type: 'id' }],
+      childRelationships: [{ relationshipName: 'Flows', childSObject: 'FlowRecord', field: 'AssociatedRecordId' }],
+    };
+    const coreSchema = flowSchema('FlowRecord', [
+      'Id',
+      'ApiName',
+      'AssociatedRecordId',
+      'SegmentId',
+      'ActiveVersionId',
+    ]);
+    const s = { ...selection, operation: 'export' as const, artifact: undefined, expectedName: undefined };
+    const zero = await runCampaign(s, transport([rows([{ Id: org }]), schema, { Id: id }, coreSchema, rows([])], []));
+    if (zero.operation !== 'export') throw new Error('Expected export');
+    expect(zero.diagnostics.associatedArtifacts).to.include({ status: 'complete' });
+    expect(zero.diagnostics.associatedArtifacts.flows).to.deep.equal([]);
+    const records = [1, 2].map((n) => ({
+      Id: `2aF00000000000${n}AAA`,
+      ApiName: `Flow_${n}`,
+      AssociatedRecordId: id,
+      SegmentId: `1sg00000000000${n}AAA`,
+      ActiveVersionId: n === 1 ? '10v000000000001AAA' : null,
+    }));
+    const calls: string[][] = [];
+    const actual = await runCampaign(
+      s,
+      transport(
+        [
+          rows([{ Id: org }]),
+          schema,
+          { Id: id },
+          coreSchema,
+          rows(records),
+          flowSchema('FlowDefinition', ['Id', 'DeveloperName', 'ActiveVersionId', 'LatestVersionId']),
+          flowSchema('Flow', ['Id', 'DefinitionId', 'Metadata']),
+          ...records.flatMap((flow, i) => [
+            rows([
+              {
+                Id: `30000000000000${i + 1}AAA`,
+                DeveloperName: flow.ApiName,
+                ActiveVersionId: null,
+                LatestVersionId: `30100000000000${i + 1}AAA`,
+              },
+            ]),
+            rows([
+              {
+                Id: `30100000000000${i + 1}AAA`,
+                DefinitionId: `30000000000000${i + 1}AAA`,
+                Metadata: { start: { triggerType: 'Segment', segment: `Audience_${i + 1}` } },
+              },
+            ]),
+          ]),
+        ],
+        calls
+      )
+    );
+    if (actual.operation !== 'export') throw new Error('Expected export');
+    expect(actual.artifact).to.deep.equal({ Id: id });
+    expect(actual.diagnostics.associatedArtifacts.status).to.equal('complete');
+    expect(actual.diagnostics.associatedArtifacts.flows?.map((flow) => flow.record)).to.deep.equal(records);
+    expect(actual.diagnostics.associatedArtifacts.flows?.map((flow) => flow.toolingFlow?.Id)).to.deep.equal([
+      '301000000000001AAA',
+      '301000000000002AAA',
+    ]);
+    expect(
+      calls.some((args) => args.includes('--query') && args[args.indexOf('--query') + 1].includes("WHERE Id = '10v"))
+    ).to.equal(false);
+    expect(
+      calls.every(
+        (args) =>
+          (args[0] === 'sobject' && args[1] === 'describe') ||
+          (args[0] === 'data' && ['get', 'query'].includes(args[1]))
+      )
+    ).to.equal(true);
+  });
+  it('reports inaccessible, incomplete, ambiguous and missing association evidence without false absence', async () => {
+    const s = { ...selection, operation: 'export' as const, artifact: undefined, expectedName: undefined };
+    const schema = {
+      name: 'Campaign',
+      queryable: true,
+      fields: [{ name: 'Id', type: 'id' }],
+      childRelationships: [{ relationshipName: 'Flows', childSObject: 'FlowRecord', field: 'AssociatedRecordId' }],
+    };
+    const flowSchema = (name: string, names: string[]): unknown => ({
+      name,
+      queryable: true,
+      fields: names.map((field) => ({ name: field, type: 'string' })),
+    });
+    const coreSchema = flowSchema('FlowRecord', ['Id', 'ApiName', 'AssociatedRecordId', 'SegmentId']);
+    for (const bad of [
+      { done: false, totalSize: 0, records: [] },
+      { done: true, totalSize: 1, records: [] },
+      rows([{ Id: '2aF000000000001AAA', AssociatedRecordId: sourceId }]),
+      rows(Array.from({ length: 101 }, () => ({}))),
+    ]) {
+      // eslint-disable-next-line no-await-in-loop -- Sequential fixture transports keep each failure case isolated.
+      const exported = await runCampaign(s, transport([rows([{ Id: org }]), schema, { Id: id }, coreSchema, bad], []));
+      if (exported.operation !== 'export') throw new Error('Expected export');
+      expect(exported.diagnostics.associatedArtifacts.status).to.equal('blocked');
+      expect(exported.diagnostics.associatedArtifacts.reason).to.match(/Incomplete|Ambiguous/);
+    }
+    for (const segment of [undefined, '', null]) {
+      const flow = {
+        Id: '2aF000000000001AAA',
+        AssociatedRecordId: id,
+        ApiName: 'Flow_1',
+        ...(segment === undefined ? {} : { SegmentId: segment }),
+      };
+      // eslint-disable-next-line no-await-in-loop -- Sequential fixture transports keep each failure case isolated.
+      const exported = await runCampaign(
+        s,
+        transport(
+          [
+            rows([{ Id: org }]),
+            schema,
+            { Id: id },
+            coreSchema,
+            rows([flow]),
+            flowSchema('FlowDefinition', ['Id', 'DeveloperName', 'ActiveVersionId', 'LatestVersionId']),
+            flowSchema('Flow', ['Id', 'DefinitionId', 'Metadata']),
+            rows([]),
+          ],
+          []
+        )
+      );
+      if (exported.operation !== 'export') throw new Error('Expected export');
+      expect(exported.diagnostics.associatedArtifacts.status).to.equal('incomplete');
+      expect(exported.diagnostics.associatedArtifacts.flows?.[0].record).to.deep.equal(flow);
+      expect(exported.diagnostics.associatedArtifacts.flows?.[0].reason).to.include(
+        segment === undefined ? 'missing is not null' : segment === '' ? 'empty or malformed' : 'absent or ambiguous'
+      );
+    }
+    const denied = await runCampaign(s, transport([rows([{ Id: org }]), schema, { Id: id }, {}], []));
+    if (denied.operation !== 'export') throw new Error('Expected export');
+    expect(denied.diagnostics.associatedArtifacts.status).to.equal('blocked');
+    expect(denied.diagnostics.associatedArtifacts.reason).to.include('schema');
+  });
+  it('blocks ambiguous Tooling members, core-version substitutions and incomplete version configuration', async () => {
+    const s = { ...selection, operation: 'export' as const, artifact: undefined, expectedName: undefined };
+    const schema = (name: string, names: string[]): unknown => ({
+      name,
+      queryable: true,
+      fields: names.map((field) => ({ name: field, type: 'string' })),
+    });
+    const campaignSchema = {
+      name: 'Campaign',
+      queryable: true,
+      fields: [{ name: 'Id', type: 'id' }],
+      childRelationships: [{ relationshipName: 'Flows', childSObject: 'FlowRecord', field: 'AssociatedRecordId' }],
+    };
+    const flow = {
+      Id: '2aF000000000001AAA',
+      ApiName: 'Flow_1',
+      AssociatedRecordId: id,
+      SegmentId: null,
+      ActiveVersionId: '10v000000000001AAA',
+    };
+    const definition = {
+      Id: '300000000000001AAA',
+      DeveloperName: 'Flow_1',
+      ActiveVersionId: null,
+      LatestVersionId: '301000000000001AAA',
+    };
+    const version = {
+      Id: definition.LatestVersionId,
+      DefinitionId: definition.Id,
+      Metadata: { start: { triggerType: 'Segment', segment: 'Audience_1' } },
+    };
+    for (const evidence of [
+      [rows([definition, definition])],
+      [rows([{ ...definition, LatestVersionId: flow.ActiveVersionId }])],
+      [rows([{ ...definition, LatestVersionId: null }])],
+      [rows([definition]), { done: false, totalSize: 1, records: [version] }],
+      [rows([definition]), rows([{ ...version, DefinitionId: '300000000000002AAA' }])],
+      [rows([definition]), rows([{ ...version, Metadata: { start: { triggerType: 'Segment' } } }])],
+    ]) {
+      const calls: string[][] = [];
+      // eslint-disable-next-line no-await-in-loop -- Sequential fixture transports keep each failure case isolated.
+      const exported = await runCampaign(
+        s,
+        transport(
+          [
+            rows([{ Id: org }]),
+            campaignSchema,
+            { Id: id },
+            schema('FlowRecord', Object.keys(flow)),
+            rows([flow]),
+            schema('FlowDefinition', Object.keys(definition)),
+            schema('Flow', Object.keys(version)),
+            ...evidence,
+          ],
+          calls
+        )
+      );
+      if (exported.operation !== 'export') throw new Error('Expected export');
+      expect(exported.diagnostics.associatedArtifacts.status).to.equal('incomplete');
+      expect(exported.diagnostics.associatedArtifacts.flows?.[0].status).to.equal('blocked');
+      expect(exported.diagnostics.associatedArtifacts.flows?.[0].record.SegmentId).to.equal(null);
+      expect(
+        calls.some((args) => args.includes('--query') && args[args.indexOf('--query') + 1].includes("WHERE Id = '10v"))
+      ).to.equal(false);
+    }
   });
   it('creates a distinct name, persists mapping before readback and refuses journal reuse', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'campaign-test-'));
+    const run = await createRunOwnedTemp('campaign-test');
+    const root = await createRunOwnedDirectory(run, 'project');
+    const sentinel = join(run.root, 'sentinel.txt');
+    await writeFile(sentinel, 'preserve sibling', { flag: 'wx' });
     try {
       const s: CampaignSelection = {
         ...selection,
@@ -160,11 +499,20 @@ describe('Campaign bounded Core configuration adapter', () => {
         'already exists'
       );
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await removeRunOwnedPath(run, root);
+      expect(existsSync(root)).to.equal(false);
+      expect((await lstat(run.root)).isDirectory()).to.equal(true);
+      expect(await readFile(sentinel, 'utf8')).to.equal('preserve sibling');
+      await unlink(sentinel);
+      await removeRunOwnedRoot(run);
+      expect(existsSync(run.root)).to.equal(false);
     }
   });
   it('requires a complete null relationship projection after CREATE', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'campaign-create-relationships-'));
+    const run = await createRunOwnedTemp('campaign-create-relationships');
+    const root = await createRunOwnedDirectory(run, 'project');
+    const sentinel = join(run.root, 'sentinel.txt');
+    await writeFile(sentinel, 'preserve sibling', { flag: 'wx' });
     try {
       const create: CampaignSelection = {
         ...selection,
@@ -196,11 +544,20 @@ describe('Campaign bounded Core configuration adapter', () => {
         'lacks required relationship projection'
       );
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await removeRunOwnedPath(run, root);
+      expect(existsSync(root)).to.equal(false);
+      expect((await lstat(run.root)).isDirectory()).to.equal(true);
+      expect(await readFile(sentinel, 'utf8')).to.equal('preserve sibling');
+      await unlink(sentinel);
+      await removeRunOwnedRoot(run);
+      expect(existsSync(run.root)).to.equal(false);
     }
   });
   it('validates journal paths before transport and accepts a nested project path', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'campaign-journal-path-'));
+    const run = await createRunOwnedTemp('campaign-journal-path');
+    const root = await createRunOwnedDirectory(run, 'project');
+    const sentinel = join(run.root, 'sentinel.txt');
+    await writeFile(sentinel, 'preserve sibling', { flag: 'wx' });
     try {
       const create: CampaignSelection = {
         ...selection,
@@ -226,7 +583,13 @@ describe('Campaign bounded Core configuration adapter', () => {
         targetId: id,
       });
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await removeRunOwnedPath(run, root);
+      expect(existsSync(root)).to.equal(false);
+      expect((await lstat(run.root)).isDirectory()).to.equal(true);
+      expect(await readFile(sentinel, 'utf8')).to.equal('preserve sibling');
+      await unlink(sentinel);
+      await removeRunOwnedRoot(run);
+      expect(existsSync(run.root)).to.equal(false);
     }
   });
   it('rejects forbidden fields, unsupported relation mapping and ambiguous inputs before transport', async () => {

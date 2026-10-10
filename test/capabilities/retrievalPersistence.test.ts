@@ -15,7 +15,7 @@ import {
 import { METADATA_CAPABILITY_CONTRACT, METADATA_CAPABILITY_FIXTURE_SHA256 } from '../../src/capabilities/contracts.js';
 import {
   createRunOwnedTemp,
-  registerRunOwnedPath,
+  createRunOwnedDirectory,
   removeRunOwnedPath,
   removeRunOwnedRoot,
   type RunOwnedTemp,
@@ -104,7 +104,6 @@ async function rejects(action: () => Promise<unknown>, message: string): Promise
 }
 
 async function cleanup(run: RunOwnedTemp, paths: string[]): Promise<void> {
-  await Promise.all(paths.map((path) => registerRunOwnedPath(run, path)));
   await Promise.all(paths.map((path) => removeRunOwnedPath(run, path)));
   await unlink(join(run.root, 'sfdx-project.json')).catch(() => undefined);
   await removeRunOwnedRoot(run);
@@ -118,6 +117,7 @@ describe('portable retrieval pre-persistence integration', () => {
         join(run.root, 'sfdx-project.json'),
         JSON.stringify({ packageDirectories: [{ path: 'custom-source' }] })
       );
+      await createRunOwnedDirectory(run, 'custom-source');
       const artifact = join(run.root, 'custom-source', 'main', 'default', 'campaigns', 'Autumn.json');
       await mkdir(join(run.root, 'custom-source', 'main', 'default', 'campaigns'), { recursive: true });
       const strictBytes = '{"sourceId":"701000000000001AAA","fields":{"Name":"Autumn Campaign"}}\n';
@@ -165,7 +165,7 @@ describe('portable retrieval pre-persistence integration', () => {
     const run = await createRunOwnedTemp('sf-mcnext-retrieval');
     try {
       await writeFile(join(run.root, 'sfdx-project.json'), JSON.stringify({ packageDirectories: [{ path: 'pkg' }] }));
-      await mkdir(join(run.root, 'pkg'), { recursive: true });
+      await createRunOwnedDirectory(run, 'pkg');
       const request = campaign();
       const cache = await refreshResolutionCache(
         createResolutionCache(campaignScope),
@@ -203,7 +203,7 @@ describe('portable retrieval pre-persistence integration', () => {
       const run = await createRunOwnedTemp('sf-mcnext-retrieval');
       try {
         await writeFile(join(run.root, 'sfdx-project.json'), JSON.stringify({ packageDirectories: [{ path: 'pkg' }] }));
-        await mkdir(join(run.root, 'pkg'), { recursive: true });
+        await createRunOwnedDirectory(run, 'pkg');
         const original = campaign();
         const cache = await refreshResolutionCache(
           createResolutionCache(campaignScope),
@@ -244,7 +244,7 @@ describe('portable retrieval pre-persistence integration', () => {
     const run = await createRunOwnedTemp('sf-mcnext-retrieval');
     try {
       await writeFile(join(run.root, 'sfdx-project.json'), JSON.stringify({ packageDirectories: [{ path: 'pkg' }] }));
-      await mkdir(join(run.root, 'pkg'), { recursive: true });
+      await createRunOwnedDirectory(run, 'pkg');
       const original = campaign();
       const cache = await refreshResolutionCache(
         createResolutionCache(campaignScope),
@@ -281,6 +281,7 @@ describe('portable retrieval pre-persistence integration', () => {
   it('writes Data Space resolver metadata only below its data360 scope without claiming transport', async () => {
     const run = await createRunOwnedTemp('sf-mcnext-retrieval');
     try {
+      await createRunOwnedDirectory(run, 'data360');
       const request = dataSpace();
       const prepared = await preparePortableRetrieval({
         projectRoot: run.root,
@@ -302,7 +303,7 @@ describe('portable retrieval pre-persistence integration', () => {
     const run = await createRunOwnedTemp('sf-mcnext-retrieval');
     try {
       await writeFile(join(run.root, 'sfdx-project.json'), JSON.stringify({ packageDirectories: [{ path: 'pkg' }] }));
-      await mkdir(join(run.root, 'pkg'), { recursive: true });
+      await createRunOwnedDirectory(run, 'pkg');
       const related = campaign();
       if (related.kind !== 'Campaign') throw new Error('expected Campaign request');
       related.source.records[0].relationships.ParentId = '701000000000002AAA';
@@ -351,7 +352,7 @@ describe('portable retrieval pre-persistence integration', () => {
         join(run.root, 'sfdx-project.json'),
         JSON.stringify({ packageDirectories: [{ path: 'custom-source' }] })
       );
-      await mkdir(join(run.root, 'custom-source'), { recursive: true });
+      await createRunOwnedDirectory(run, 'custom-source');
       const request = campaign();
       await rejects(
         () =>

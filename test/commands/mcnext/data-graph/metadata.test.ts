@@ -1,21 +1,37 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TestContext } from '@salesforce/core/testSetup';
 import { expect } from 'chai';
 import DataGraphMetadata from '../../../../src/commands/mcnext/data-graph/metadata.js';
+import {
+  createRunOwnedDirectory,
+  createRunOwnedTemp,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+  type RunOwnedTemp,
+} from '../../../../src/filesystem/runOwnedTemp.js';
 
 describe('mcnext data-graph metadata', () => {
   const $$ = new TestContext();
+  let run: RunOwnedTemp;
   let directory: string;
+  let sentinel: string;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'mcnext-data-graph-'));
+    run = await createRunOwnedTemp('mcnext-data-graph');
+    directory = await createRunOwnedDirectory(run, 'fixture');
+    sentinel = join(run.root, 'sentinel.txt');
+    await writeFile(sentinel, 'sibling-survives');
   });
 
   afterEach(async () => {
     $$.restore();
-    await rm(directory, { force: true, recursive: true });
+    await removeRunOwnedPath(run, directory);
+    expect(await lstat(directory).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
+    expect(await readFile(sentinel, 'utf8')).to.equal('sibling-survives');
+    await unlink(sentinel);
+    await removeRunOwnedRoot(run);
+    expect(await lstat(run.root).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
   });
 
   it('performs one authenticated read against the exact metadata endpoint', async () => {

@@ -1,8 +1,14 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { mkdir, readFile, rmdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { Connection, Org } from '@salesforce/core';
 import { expect } from 'chai';
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+  type RunOwnedTemp,
+} from '../../src/filesystem/runOwnedTemp.js';
 import { McnClient } from '../../src/client/mcnClient.js';
 import { listSegmentsStrict } from '../../src/commands/mcnext/segment/definition/create.js';
 import {
@@ -79,12 +85,15 @@ const envelope = (operation: 'validate' | 'create' | 'retrieve') => ({
 });
 
 describe('bounded Segment Definition CREATE', () => {
+  let run: RunOwnedTemp;
   let root: string;
   let sourceXml: string;
   let selection: SegmentDefinitionCreateSelection;
 
   beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), 'segment-create-test-'));
+    root = '';
+    run = await createRunOwnedTemp('segment-create-test');
+    root = await createRunOwnedDirectory(run, 'project');
     await mkdir(join(root, 'custom/main/default/marketSegmentDefinitions'), { recursive: true });
     await writeFile(join(root, 'sfdx-project.json'), JSON.stringify({ packageDirectories: [{ path: 'custom' }] }));
     sourceXml = await readFile('test/segment/fixtures/ui-synthetic.marketSegmentDefinition-meta.xml', 'utf8');
@@ -105,7 +114,10 @@ describe('bounded Segment Definition CREATE', () => {
     };
   });
 
-  afterEach(async () => rm(root, { recursive: true, force: true }));
+  afterEach(async () => {
+    if (root) await removeRunOwnedPath(run, root);
+    await removeRunOwnedRoot(run);
+  });
 
   it('stops after check-only validation for dry-run', async () => {
     const calls: string[][] = [];
@@ -124,6 +136,83 @@ describe('bounded Segment Definition CREATE', () => {
     expect(calls).to.have.length(1);
     expect(calls[0]).to.include('--dry-run');
   });
+
+  it('cleans both owned roots when validation fails without mutating source', async () => {
+    let scratch = '';
+    let error: unknown;
+    try {
+      await createSegmentDefinition(selection, {
+        resolveOrgIdentity: async (alias) => (alias === 'source' ? sourceOrgId : targetOrgId),
+        core: async (_args, cwd) => {
+          scratch = cwd;
+          throw new Error('validation failure');
+        },
+        connect: { list: async () => [], show: async () => ({}) },
+      });
+    } catch (caught) {
+      error = caught;
+    }
+    expect((error as Error).message).to.equal('validation failure');
+    expect(basename(scratch)).to.equal('project');
+    expect(await stat(scratch).catch((caught: NodeJS.ErrnoException) => caught.code)).to.equal('ENOENT');
+    expect(await stat(dirname(scratch)).catch((caught: NodeJS.ErrnoException) => caught.code)).to.equal('ENOENT');
+    expect(await readFile(join(root, selection.sourceFile), 'utf8')).to.equal(sourceXml);
+  });
+
+  for (const stage of ['validated', 'validation-failure', 'readback-failure'] as const) {
+    it(`preserves ${stage} diagnostics when nonrecursive root cleanup fails`, async () => {
+      let retainedRoot = '';
+      const scratchProjects: string[] = [];
+      let applies = 0;
+      let error: unknown;
+      try {
+        await createSegmentDefinition(
+          { ...selection, dryRun: stage !== 'readback-failure' },
+          {
+            resolveOrgIdentity: async (alias) => (alias === 'source' ? sourceOrgId : targetOrgId),
+            core: async (args, cwd) => {
+              scratchProjects.push(cwd);
+              const retrieve = args[1] === 'retrieve';
+              if (!retrieve && !args.includes('--dry-run')) applies++;
+              if ((stage === 'readback-failure' && retrieve) || stage !== 'readback-failure') {
+                retainedRoot = dirname(cwd);
+                await writeFile(join(retainedRoot, 'unregistered-sentinel'), 'must not be recursively removed');
+                if (stage !== 'validated') throw new Error(`${stage} original error`);
+              }
+              return envelope(retrieve ? 'retrieve' : args.includes('--dry-run') ? 'validate' : 'create');
+            },
+            connect: { list: async () => [], show: async () => ({}) },
+          }
+        );
+      } catch (caught) {
+        error = caught;
+      }
+      try {
+        expect(error).to.be.instanceOf(Error);
+        expect((error as Error).message).to.include('scratch cleanup failed at');
+        expect((error as Error).message).to.include(retainedRoot);
+        expect((error as Error).message).to.include(
+          stage === 'validated' ? '"state":"validated"' : `${stage} original error`
+        );
+        if (stage === 'readback-failure') expect((error as Error).message).to.include('readback outcome');
+        expect(applies).to.equal(stage === 'readback-failure' ? 1 : 0);
+        expect(await readFile(join(retainedRoot, 'unregistered-sentinel'), 'utf8')).to.equal(
+          'must not be recursively removed'
+        );
+        await Promise.all(
+          scratchProjects.map(async (cwd) => {
+            expect(await stat(cwd).catch((caught: NodeJS.ErrnoException) => caught.code)).to.equal('ENOENT');
+          })
+        );
+        expect(await readFile(join(root, selection.sourceFile), 'utf8')).to.equal(sourceXml);
+      } finally {
+        // Remove only the exact files created in this test; never recursively delete the retained run root.
+        await unlink(join(retainedRoot, 'unregistered-sentinel'));
+        await unlink(join(retainedRoot, '.sf-mcnext-run-owner.json'));
+        await rmdir(retainedRoot);
+      }
+    });
+  }
 
   it('fails locally on an absent mapping before Core or Connect is invoked', async () => {
     let coreCalls = 0;
@@ -379,6 +468,13 @@ describe('bounded Segment Definition CREATE', () => {
     let listCalls = 0;
     const core: SegmentCoreRunner = async (args, cwd) => {
       calls.push({ args, cwd });
+      expect(basename(cwd)).to.equal('project');
+      expect(cwd).not.to.equal(root);
+      const marker = JSON.parse(await readFile(join(dirname(cwd), '.sf-mcnext-run-owner.json'), 'utf8')) as {
+        runId: string;
+      };
+      expect(marker.runId).to.match(/^[a-f0-9-]{36}$/u);
+      expect(await readFile(join(root, selection.sourceFile), 'utf8')).to.equal(sourceXml);
       const operation = args[1] === 'retrieve' ? 'retrieve' : args.includes('--dry-run') ? 'validate' : 'create';
       if (operation === 'retrieve') {
         const project = JSON.parse(await readFile(join(cwd, 'sfdx-project.json'), 'utf8')) as {
@@ -426,6 +522,14 @@ describe('bounded Segment Definition CREATE', () => {
     expect(identityCalls).to.equal(4);
     expect(calls.filter((call) => call.args[1] === 'deploy' && !call.args.includes('--dry-run'))).to.have.length(1);
     expect(calls.find((call) => call.args[1] === 'retrieve')?.cwd).not.to.equal(calls[0].cwd);
+    await Promise.all(
+      calls
+        .flatMap((call) => [call.cwd, dirname(call.cwd)])
+        .map(async (path) => {
+          expect(await stat(path).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
+        })
+    );
+    expect(await readFile(join(root, selection.sourceFile), 'utf8')).to.equal(sourceXml);
   });
 
   it('returns pending after bounded visibility lag without redeploying', async () => {

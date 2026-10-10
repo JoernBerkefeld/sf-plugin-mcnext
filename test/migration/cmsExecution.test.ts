@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import type { ChildProcess, spawn } from 'node:child_process';
@@ -10,6 +9,13 @@ import { expect } from 'chai';
 import type { CmsEnvelope, CmsImportResult } from '../../src/cms/contracts.js';
 import { buildCmsExecutionPlan, executeCmsPlan } from '../../src/migration/cmsExecution.js';
 import { validInfoFixture } from '../cms/contractFixtures.js';
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+  type RunOwnedTemp,
+} from '../../src/filesystem/runOwnedTemp.js';
 
 const sourceWorkspaceId = '0Zu000000000001AAA';
 const targetWorkspaceId = '0Zu000000000002AAA';
@@ -78,22 +84,39 @@ async function rejects(action: () => Promise<unknown>, message: string): Promise
 }
 
 describe('CMS migration execution', () => {
+  let run: RunOwnedTemp;
+  let sentinel: string;
   let directory: string;
   let sourceDirectory: string;
   let sourcePlanFile: string;
   let sourcePlanSha256: string;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'mcnext-cms-execution-'));
+    run = await createRunOwnedTemp('mcnext-cms-execution');
+    directory = await createRunOwnedDirectory(run, 'fixtures');
+    sentinel = join(run.root, 'sentinel.txt');
+    await writeFile(sentinel, 'preserve outside fixture child\n');
     sourceDirectory = join(directory, sourceWorkspaceId);
     sourcePlanFile = join(directory, 'migration-plan.json');
     await mkdir(sourceDirectory);
     await writeFile(join(sourceDirectory, 'manifest.json'), '{}\n');
     await writeFile(sourcePlanFile, '{"schemaVersion":1}\n');
-    sourcePlanSha256 = createHash('sha256').update(await readFile(sourcePlanFile)).digest('hex');
+    sourcePlanSha256 = createHash('sha256')
+      .update(await readFile(sourcePlanFile))
+      .digest('hex');
   });
 
-  afterEach(async () => rm(directory, { recursive: true, force: true }));
+  afterEach(async () => {
+    try {
+      await removeRunOwnedPath(run, directory);
+      expect(await stat(directory).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
+      expect(await readFile(sentinel, 'utf8')).to.equal('preserve outside fixture child\n');
+    } finally {
+      await unlink(sentinel);
+      await removeRunOwnedRoot(run);
+    }
+    expect(await stat(run.root).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
+  });
 
   it('builds an immutable canonical plan and completes dry-run without apply', async () => {
     const calls: SpawnCall[] = [];

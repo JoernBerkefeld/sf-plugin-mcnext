@@ -1,8 +1,14 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect } from 'chai';
 import { McnClient } from '../../../../src/client/mcnClient.js';
+import {
+  createRunOwnedDirectory,
+  createRunOwnedTemp,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+  type RunOwnedTemp,
+} from '../../../../src/filesystem/runOwnedTemp.js';
 import {
   exportIdentityResolutionConfiguration,
   listIdentityResolutions,
@@ -48,14 +54,24 @@ function clientWith(handler: (request: RequestOptions) => unknown): McnClient {
 }
 
 describe('identity-resolution configuration', () => {
+  let run: RunOwnedTemp;
   let directory: string;
+  let sentinel: string;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'mcnext-identity-resolution-'));
+    run = await createRunOwnedTemp('mcnext-identity-resolution');
+    directory = await createRunOwnedDirectory(run, 'fixture');
+    sentinel = join(run.root, 'sentinel.txt');
+    await writeFile(sentinel, 'sibling-survives');
   });
 
   afterEach(async () => {
-    await rm(directory, { recursive: true, force: true });
+    await removeRunOwnedPath(run, directory);
+    expect(await lstat(directory).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
+    expect(await readFile(sentinel, 'utf8')).to.equal('sibling-survives');
+    await unlink(sentinel);
+    await removeRunOwnedRoot(run);
+    expect(await lstat(run.root).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
   });
 
   it('parses identityResolutions with one request and no invented pagination', async () => {

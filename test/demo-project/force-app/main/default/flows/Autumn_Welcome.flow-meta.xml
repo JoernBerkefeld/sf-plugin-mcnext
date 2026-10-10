@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Flow xmlns="http://soap.sforce.com/2006/04/metadata">
+  <apiVersion>67.0</apiVersion>
+  <description
+    >Synthetic inactive automation for Autumn Promo. Inventory references describe intended integration only; no send
+    action or mapped org identities.</description
+  >
+  <interviewLabel>Autumn Welcome {!$Flow.CurrentDateTime}</interviewLabel>
+  <label>Autumn Welcome</label>
+  <processType>AutoLaunchedFlow</processType>
+  <start><locationX>0</locationX><locationY>0</locationY></start>
+  <status>Draft</status>
+</Flow>

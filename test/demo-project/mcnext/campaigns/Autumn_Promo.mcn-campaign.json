@@ -1,0 +1,11 @@
+{
+  "Id": "701000000000001AAA",
+  "Name": "Autumn Promo",
+  "Type": "Email",
+  "Status": "Planned",
+  "IsActive": false,
+  "Description": "Synthetic Campaign selected for the imaginary retrieve-all project.",
+  "ParentId": null,
+  "StartDate": null,
+  "EndDate": null
+}

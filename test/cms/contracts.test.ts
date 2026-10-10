@@ -10,6 +10,11 @@ import {
 } from '../../src/cms/contracts.js';
 import {
   cloneFixture,
+  currentInfoFixture,
+  currentRegistryInfoFixture,
+  partialFailedExportFixture,
+  failedExportFixture,
+  blockedExportFixture,
   fixtureProvenance,
   publishedCapture,
   publishedInfoFixture,
@@ -23,6 +28,117 @@ function rejects(action: () => unknown, detail: string): void {
 }
 
 describe('CMS public contract boundary', () => {
+  it('retains current lifecycle advertisements in v1 and v2 without creating routes', () => {
+    expect(validateCmsInfo(currentInfoFixture).envelope.result).to.deep.equal(currentInfoFixture.result);
+    expect(validateCmsRegistryInfo(currentRegistryInfoFixture).envelope.result).to.deep.equal(
+      currentRegistryInfoFixture.result
+    );
+    for (const invalid of [true, '1.0.0', ['1'], ['1.0.0', false]]) {
+      const fixture = cloneFixture(currentRegistryInfoFixture) as unknown as {
+        result: { contracts: { commandResults: Record<string, unknown> } };
+      };
+      fixture.result.contracts.commandResults.contentDelete = invalid;
+      expect(() => validateCmsRegistryInfo(fixture)).to.throw(CmsContractError);
+    }
+    const missing = cloneFixture(currentInfoFixture) as unknown as {
+      result: { contracts: { commandResults: Record<string, unknown> } };
+    };
+    delete missing.result.contracts.commandResults.workspaceImport;
+    rejects(() => validateCmsInfo(missing), 'command results fields');
+    const unorderedRegistry = cloneFixture(currentRegistryInfoFixture);
+    unorderedRegistry.result.registry.declarations.reverse();
+    rejects(() => validateCmsRegistryInfo(unorderedRegistry), 'registry declarations must be canonically ordered');
+    const duplicateRegistry = cloneFixture(currentRegistryInfoFixture);
+    duplicateRegistry.result.registry.declarations.push(
+      cloneFixture(duplicateRegistry.result.registry.declarations[0])
+    );
+    rejects(() => validateCmsRegistryInfo(duplicateRegistry), 'registry declarations must be unique');
+    const hash = cloneFixture(currentRegistryInfoFixture) as unknown as {
+      result: { registry: { fixtureSha256: string } };
+    };
+    hash.result.registry.fixtureSha256 = 'b'.repeat(64);
+    rejects(() => validateCmsRegistryInfo(hash), 'registry fixture hash');
+  });
+
+  it('preserves real failed-null rows and terminal blocked-null evidence', () => {
+    for (const fixture of [partialFailedExportFixture, failedExportFixture, blockedExportFixture]) {
+      expect(validateCmsExport(fixture)).to.deep.equal(fixture);
+    }
+    const empty = cloneFixture(validExportFixture);
+    empty.result!.workspaces = [];
+    empty.result!.externalReferenceCorrelations = [];
+    empty.result!.selection = { mode: 'all', discoveredCount: 0, selectedCount: 0 };
+    empty.result!.summary = { succeededCount: 0, partialCount: 0, failedCount: 0 };
+    expect(validateCmsExport(empty).status).to.equal('success');
+    for (const status of ['success', 'partial', 'blocked']) {
+      const fixture = cloneFixture(failedExportFixture) as unknown as {
+        result: { workspaces: Array<{ status: string }> };
+      };
+      fixture.result.workspaces[0].status = status;
+      rejects(() => validateCmsExport(fixture), 'workspace artifact is required');
+    }
+    const correlation = cloneFixture(partialFailedExportFixture);
+    correlation.result!.externalReferenceCorrelations[0].sourceWorkspaceId = '0ZuSource2';
+    rejects(() => validateCmsExport(correlation), 'correlation workspace binding');
+    const missingId = cloneFixture(failedExportFixture);
+    delete missingId.provenance.exportSetId;
+    rejects(() => validateCmsExport(missingId), 'exportSetId is required');
+    const wrongType = cloneFixture(failedExportFixture) as unknown as {
+      result: { workspaces: Array<{ source: { workspaceType: string } }> };
+    };
+    wrongType.result.workspaces[0].source.workspaceType = 'Content';
+    rejects(() => validateCmsExport(wrongType), 'workspace source type');
+    for (const status of ['success', 'partial'] as const) {
+      const fixture = cloneFixture(blockedExportFixture);
+      fixture.status = status;
+      rejects(() => validateCmsExport(fixture), 'result cannot be null');
+    }
+  });
+  it('keeps additive advertisements bounded to version arrays and exact surrounding records', () => {
+    const additive = cloneFixture(currentInfoFixture);
+    additive.result!.contracts.commandResults.futureRead = ['1.0.0', '2.3.4'];
+    expect(validateCmsInfo(additive).envelope.result!.contracts.commandResults.futureRead).to.deep.equal([
+      '1.0.0',
+      '2.3.4',
+    ]);
+    const unknown = cloneFixture(currentRegistryInfoFixture) as unknown as {
+      result: { contracts: Record<string, unknown> };
+    };
+    unknown.result.contracts.future = {};
+    rejects(() => validateCmsRegistryInfo(unknown), 'contracts fields');
+  });
+
+  it('allows missing export-set identity only for terminal null results', () => {
+    const failed = cloneFixture(blockedExportFixture);
+    failed.status = 'failed';
+    expect(validateCmsExport(failed)).to.deep.equal(failed);
+    for (const status of ['success', 'partial'] as const) {
+      const fixture = cloneFixture(failed);
+      fixture.status = status;
+      rejects(() => validateCmsExport(fixture), 'result cannot be null');
+    }
+    const usable = cloneFixture(validExportFixture);
+    delete usable.provenance.exportSetId;
+    rejects(() => validateCmsExport(usable), 'exportSetId is required');
+  });
+
+  it('still rejects inconsistent summaries and duplicate retained paths beside null failures', () => {
+    const wrongCount = cloneFixture(partialFailedExportFixture);
+    wrongCount.result!.summary.failedCount = 0;
+    rejects(() => validateCmsExport(wrongCount), 'summary counts');
+    const wrongStatus = cloneFixture(partialFailedExportFixture);
+    wrongStatus.status = 'success';
+    rejects(() => validateCmsExport(wrongStatus), 'export status');
+    const duplicate = cloneFixture(partialFailedExportFixture);
+    duplicate.result!.workspaces.push({
+      ...cloneFixture(duplicate.result!.workspaces[0]),
+      source: { ...duplicate.result!.workspaces[0].source, sourceId: '0ZuSource3' },
+    });
+    duplicate.result!.selection = { mode: 'all', discoveredCount: 3, selectedCount: 3 };
+    duplicate.result!.summary.succeededCount = 2;
+    rejects(() => validateCmsExport(duplicate), 'duplicate artifact path');
+  });
+
   it('accepts forward-compatible compatibility advertisements independent of provider semver', () => {
     const validated = validateCmsInfo(validInfoFixture);
 

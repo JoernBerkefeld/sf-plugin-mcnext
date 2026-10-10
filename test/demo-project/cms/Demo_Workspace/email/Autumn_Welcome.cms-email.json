@@ -1,0 +1,22 @@
+{
+  "contract": "sf-cms-source-definition",
+  "contractVersion": "1.0.0",
+  "identity": {
+    "family": "cms",
+    "type": "Email",
+    "apiName": "Autumn_Welcome",
+    "context": { "workspaceApiName": "Demo_Workspace" }
+  },
+  "contentType": "sfdc_cms__email",
+  "contentBody": {
+    "sfdc_cms:title": "Autumn Welcome",
+    "subjectLine": "A synthetic autumn greeting",
+    "messagePurpose": "Transactional",
+    "lightning:expressions": [],
+    "sfdc_cms:variants": []
+  },
+  "language": "en_US",
+  "title": "Autumn Welcome",
+  "folderPath": [],
+  "companions": { "rawHtml": "Autumn_Welcome.cms-email.html" }
+}

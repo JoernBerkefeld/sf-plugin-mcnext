@@ -1,10 +1,16 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execCmd } from '@salesforce/cli-plugins-testkit';
 import { expect } from 'chai';
 import { SegmentMembersExportResult } from '../../../../../src/commands/mcnext/segment/members/export.js';
+import {
+  createRunOwnedDirectory,
+  createRunOwnedTemp,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+  RunOwnedTemp,
+} from '../../../../../src/filesystem/runOwnedTemp.js';
 import { requirePrivateNutAlias, requirePrivateNutValue } from '../../../../support/privateNutValues.js';
 
 const NUT_ENABLED = process.env.SF_PLUGIN_MCNEXT_NUTS === '1';
@@ -24,6 +30,7 @@ const PAGE_SIZE = 200;
 const MAX_PAGES = 50;
 const MAX_ITEMS = 10_000;
 
+let run: RunOwnedTemp | undefined;
 let testDirectory: string | undefined;
 let authorizedOrgAlias: string;
 let publishedSegmentApiName: string;
@@ -48,11 +55,16 @@ let publishedSegmentApiName: string;
     );
     const org = JSON.parse(orgDisplay) as { result?: { id?: string } };
     expect(org.result?.id).to.equal(expectedOrgId);
-    testDirectory = await mkdtemp(join(tmpdir(), 'sf-plugin-mcnext-nut-'));
+    run = await createRunOwnedTemp('sf-plugin-mcnext-nut');
+    testDirectory = await createRunOwnedDirectory(run, 'fixture');
+    expect(Object.isFrozen(run)).to.equal(true);
+    expect(testDirectory).to.equal(join(run.root, 'fixture'));
   });
 
   after(async () => {
-    if (testDirectory) await rm(testDirectory, { force: true, recursive: true });
+    if (!run) return;
+    if (testDirectory) await removeRunOwnedPath(run, testDirectory);
+    await removeRunOwnedRoot(run);
   });
 
   it('exports a bounded member sample without mutation', async () => {

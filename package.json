@@ -19,7 +19,7 @@
     "@oclif/core": "^4",
     "@salesforce/core": "^9",
     "@salesforce/sf-plugins-core": "^12",
-    "sf-plugin-cms": "^0.6.1",
+    "sf-plugin-cms": "^0.9.0",
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
@@ -27,21 +27,20 @@
     "@salesforce/cli-plugins-testkit": "^5.3.10",
     "@salesforce/dev-scripts": "^10",
     "@types/xml2js": "^0.4.14",
+    "convert-source-map": "^1.9.0",
     "cross-env": "^10.1.0",
     "eslint-plugin-sf-plugin": "^1.18.6",
+    "istanbul-lib-instrument": "^6.0.3",
+    "nyc": "^17.1.0",
     "oclif": "^4.14.0",
+    "test-exclude": "^6.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5"
   },
   "engines": {
     "node": ">=22.19.0"
   },
-  "files": [
-    "/lib",
-    "/messages",
-    "/oclif.manifest.json",
-    "/oclif.lock"
-  ],
+  "files": ["/lib", "/messages", "/oclif.manifest.json", "/oclif.lock"],
   "keywords": [
     "salesforce",
     "salesforcedx",
@@ -55,13 +54,9 @@
   "oclif": {
     "commands": "./lib/commands",
     "bin": "sf",
-    "plugins": [
-      "sf-plugin-cms"
-    ],
+    "plugins": ["sf-plugin-cms"],
     "topicSeparator": " ",
-    "devPlugins": [
-      "@oclif/plugin-help"
-    ],
+    "devPlugins": ["@oclif/plugin-help"],
     "topics": {
       "mcnext": {
         "description": "Export and inspect Marketing Cloud Next data and configuration, with core CLI delegation."
@@ -105,110 +100,78 @@
   },
   "wireit": {
     "build": {
-      "dependencies": [
-        "compile",
-        "lint"
-      ]
+      "dependencies": ["compile", "lint"]
     },
     "compile": {
       "command": "tsc -p tsconfig.json --pretty --incremental false",
-      "files": [
-        "src/**/*.ts",
-        "**/tsconfig.json",
-        "messages/**"
-      ],
-      "output": [
-        "lib/**/*"
-      ],
+      "files": ["src/**/*.ts", "**/tsconfig.json", "messages/**"],
+      "output": ["lib/**/*"],
       "clean": "if-file-deleted"
     },
     "format": {
       "command": "prettier --write \"+(src|test|schemas)/**/*.+(ts|js|json)|command-snapshot.json\"",
-      "files": [
-        "src/**/*.ts",
-        "test/**/*.ts",
-        "schemas/**/*.json",
-        "command-snapshot.json",
-        ".prettier*"
-      ],
+      "files": ["src/**/*.ts", "test/**/*.ts", "schemas/**/*.json", "command-snapshot.json", ".prettier*"],
       "output": []
     },
     "lint": {
       "command": "cross-env ESLINT_USE_FLAT_CONFIG=false eslint src test --color --cache --cache-location .eslintcache",
-      "files": [
-        "src/**/*.ts",
-        "test/**/*.ts",
-        "messages/**",
-        "**/.eslint*",
-        "**/tsconfig.json"
-      ],
+      "files": ["src/**/*.ts", "test/**/*.ts", "messages/**", "**/.eslint*", "**/tsconfig.json"],
       "output": []
     },
     "manifest": {
       "command": "oclif manifest",
-      "dependencies": [
-        "compile"
-      ],
-      "files": [
-        "lib/**/*",
-        "messages/**",
-        "package.json"
-      ],
-      "output": [
-        "oclif.manifest.json"
-      ],
+      "dependencies": ["compile"],
+      "files": ["lib/**/*", "messages/**", "package.json"],
+      "output": ["oclif.manifest.json"],
       "clean": "if-file-deleted"
     },
     "test:compile": {
       "command": "tsc -p \"./test\" --pretty",
-      "files": [
-        "test/**/*.ts",
-        "**/tsconfig.json"
-      ],
+      "files": ["test/**/*.ts", "**/tsconfig.json"],
       "output": []
     },
     "test": {
-      "dependencies": [
-        "test:compile",
-        "test:dependency-compat",
-        "test:only",
-        "test:package-parser",
-        "lint"
-      ]
+      "dependencies": ["test:compile", "test:dependency-compat", "test:only", "test:package-parser", "lint"]
     },
     "test:dependency-compat": {
       "command": "node --test scripts/minimatch-compat.test.mjs",
-      "files": [
-        "scripts/minimatch-compat.test.mjs",
-        "package-lock.json"
-      ],
+      "files": ["scripts/minimatch-compat.test.mjs", "package-lock.json"],
       "output": []
     },
     "test:package-parser": {
-      "command": "node --test scripts/parse-npm-pack-output.test.mjs",
+      "command": "node --test scripts/parse-npm-pack-output.test.mjs scripts/verify-package-lifecycle.test.mjs scripts/run-unit-tests.test.mjs scripts/coverage-loader.test.mjs",
+      "dependencies": ["compile"],
       "files": [
         "scripts/parse-npm-pack-output.mjs",
-        "scripts/parse-npm-pack-output.test.mjs"
+        "scripts/parse-npm-pack-output.test.mjs",
+        "scripts/verify-package-lifecycle.mjs",
+        "scripts/verify-package-lifecycle.test.mjs",
+        "scripts/run-unit-tests.mjs",
+        "scripts/run-unit-tests.test.mjs",
+        "scripts/coverage-loader.mjs",
+        "scripts/coverage-loader.test.mjs"
       ],
       "output": []
     },
     "test:only": {
-      "command": "nyc mocha \"test/**/*.test.ts\"",
-      "dependencies": [
-        "manifest"
-      ],
+      "command": "node scripts/run-unit-tests.mjs",
+      "dependencies": ["manifest"],
       "env": {
         "FORCE_COLOR": "2"
       },
       "files": [
         "test/**/*.ts",
+        "test/demo-project/**",
+        "test/fixtures/demo-project/**/*.json",
+        "README.md",
         "src/**/*.ts",
         "**/tsconfig.json",
         ".mocha*",
         "!*.nut.ts",
-        ".nycrc"
-      ],
-      "output": []
+        ".nycrc",
+        "scripts/run-unit-tests.mjs",
+        "scripts/coverage-loader.mjs"
+      ]
     }
   },
   "exports": "./lib/index.js",

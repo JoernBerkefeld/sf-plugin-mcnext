@@ -1,7 +1,12 @@
-import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { mkdir, writeFile, readFile, rmdir, stat } from 'node:fs/promises';
+import { dirname, join, basename } from 'node:path';
 import { expect } from 'chai';
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+} from '../../src/filesystem/runOwnedTemp.js';
 import { assertInactiveFlowSource, createFlow } from '../../src/core/flowCreate.js';
 import { type CoreRunner } from '../../src/core/flowCli.js';
 
@@ -39,7 +44,8 @@ describe('bounded Flow CREATE', () => {
   });
 
   it('rejects invalid names, identity, wait and unsafe package paths before any CLI call', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'flow-create-guards-'));
+    const run = await createRunOwnedTemp('flow-create-guards');
+    const root = await createRunOwnedDirectory(run, 'project');
     try {
       await writeFile(
         join(root, 'sfdx-project.json'),
@@ -81,7 +87,8 @@ describe('bounded Flow CREATE', () => {
       );
       expect(calls).to.equal(0);
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await removeRunOwnedPath(run, root);
+      await removeRunOwnedRoot(run);
     }
   });
 
@@ -101,8 +108,10 @@ describe('bounded Flow CREATE', () => {
     'bad-source',
   ] as const) {
     it(`handles ${scenario} without implicit upsert or unsafe apply`, async () => {
-      const root = await mkdtemp(join(tmpdir(), 'flow-create-test-'));
+      const run = await createRunOwnedTemp('flow-create-test');
+      const root = await createRunOwnedDirectory(run, 'project');
       const calls: string[][] = [];
+      const scratchProjects = new Set<string>();
       try {
         await mkdir(join(root, 'custom'), { recursive: true });
         await writeFile(
@@ -141,6 +150,9 @@ describe('bounded Flow CREATE', () => {
             return response({ records, totalSize: records.length, done: scenario !== 'incomplete' });
           }
           expect(cwd).not.to.equal(root);
+          expect(basename(cwd)).to.equal('project');
+          expect((await stat(join(dirname(cwd), '.sf-mcnext-run-owner.json'))).isFile()).to.equal(true);
+          scratchProjects.add(cwd);
           const flowPath = join(cwd, 'custom/main/default/flows', `${member}.flow-meta.xml`);
           if (args[1] !== 'retrieve') expect(await readFile(flowPath, 'utf8')).to.equal(source);
           expect(args).to.include(`Flow:${member}`).and.not.to.include('--ignore-conflicts');
@@ -151,7 +163,7 @@ describe('bounded Flow CREATE', () => {
             );
             expect((await stat(join(cwd, 'custom'))).isDirectory()).to.equal(true);
             if (scenario === 'missing-readback-package-directory') {
-              await rm(join(cwd, 'custom'), { recursive: true, force: true });
+              await rmdir(join(cwd, 'custom'));
               return response(
                 {
                   name: 'MissingPackageDirectoryError',
@@ -208,6 +220,15 @@ describe('bounded Flow CREATE', () => {
         } catch (caught) {
           error = caught;
         }
+        await Promise.all(
+          [...scratchProjects].map(async (cwd) => {
+            for (const path of [cwd, dirname(cwd)]) {
+              // eslint-disable-next-line no-await-in-loop -- verify both owned child and nonrecursive root cleanup
+              const metadata = await stat(path).catch((caught: NodeJS.ErrnoException) => caught.code);
+              expect(metadata).to.equal('ENOENT');
+            }
+          })
+        );
         const apply = calls.filter(
           (args) => args[0] === 'project' && args[1] === 'deploy' && !args.includes('--dry-run')
         );
@@ -230,7 +251,8 @@ describe('bounded Flow CREATE', () => {
           );
         }
       } finally {
-        await rm(root, { recursive: true, force: true });
+        await removeRunOwnedPath(run, root);
+        await removeRunOwnedRoot(run);
       }
     });
   }

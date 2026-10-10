@@ -9,22 +9,33 @@ const packageRoot = resolve(import.meta.dirname, '..');
 const npmCli = process.env.npm_execpath;
 assert.ok(npmCli, 'npm_execpath is required to run the package lifecycle');
 
-execFileSync(process.execPath, [join(packageRoot, 'node_modules', 'typescript', 'bin', 'tsc'), '-p', 'tsconfig.json', '--pretty', '--incremental', 'false'], {
-  cwd: packageRoot,
-  stdio: 'inherit',
-});
+execFileSync(
+  process.execPath,
+  [
+    join(packageRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
+    '-p',
+    'tsconfig.json',
+    '--pretty',
+    '--incremental',
+    'false',
+  ],
+  {
+    cwd: packageRoot,
+    stdio: 'inherit',
+  }
+);
 const { createRunOwnedDirectory, createRunOwnedTemp, removeRunOwnedPath, removeRunOwnedRoot } = await import(
   '../lib/filesystem/runOwnedTemp.js'
 );
 const cleanupRun = await createRunOwnedTemp('sf-plugin-mcnext-package');
 const workDir = await createRunOwnedDirectory(cleanupRun, 'pack');
 
-const packedFiles = execFileSync(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', workDir], {
-  cwd: packageRoot,
-  encoding: 'utf8',
-});
-
 try {
+  const packedFiles = execFileSync(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', workDir], {
+    cwd: packageRoot,
+    encoding: 'utf8',
+  });
+
   const packResults = parseNpmPackOutput(packedFiles);
   assert.equal(packResults.length, 1, 'npm pack must report exactly one package result');
   const [packResult] = packResults;
@@ -61,11 +72,20 @@ try {
     'mcnext:list:types',
     'mcnext:migration:cms',
     'mcnext:migration:plan',
+    'mcnext:retrieve:all',
     'mcnext:segment:definition:create',
     'mcnext:segment:members:export',
     'mcnext:segment:records:export',
   ].sort();
   assert.deepEqual(commandIds, expectedCommandIds, 'manifest public command IDs do not match the Phase 2 contract');
+  const retrieveAllCommand = manifest.commands['mcnext:retrieve:all'];
+  assert.deepEqual(retrieveAllCommand.aliases, ['mcn:retrieve:all'], 'retrieve all alias must remain available');
+  for (const flag of ['target-org', 'expected-org-id', 'project-dir']) {
+    assert.equal(retrieveAllCommand.flags[flag]?.required, true, `retrieve all requires explicit --${flag}`);
+  }
+  assert.equal(retrieveAllCommand.flags['api-version']?.default, '67.0');
+  assert.equal(retrieveAllCommand.flags.wait?.type, 'option');
+  assert.equal(retrieveAllCommand.flags.wait?.default, 10);
 
   execFileSync('tar', ['-xf', tarball, '-C', workDir, 'package/lib/registry/registry.js']);
   const registryUrl = pathToFileURL(join(workDir, 'package', 'lib', 'registry', 'registry.js'));
@@ -110,8 +130,12 @@ try {
   const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
   assert.equal(packageJson.exports, './lib/index.js', 'package export must point to the compiled entry point');
   const cmsDependencyRange = packageJson.dependencies?.['sf-plugin-cms'];
-  assert.equal(typeof cmsDependencyRange, 'string', 'CMS provider must remain a runtime dependency');
-  assert.deepEqual(packageJson.oclif?.plugins, ['sf-plugin-cms'], 'CMS provider must remain registered as an oclif plugin');
+  assert.equal(cmsDependencyRange, '^0.9.0', 'CMS provider must target the current info-v2 candidate');
+  assert.deepEqual(
+    packageJson.oclif?.plugins,
+    ['sf-plugin-cms'],
+    'CMS provider must remain registered as an oclif plugin'
+  );
 
   const packedPackageJsonText = execFileSync('tar', ['-xOf', tarball, 'package/package.json'], { encoding: 'utf8' });
   const packedPackageJson = JSON.parse(packedPackageJsonText);

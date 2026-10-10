@@ -1,5 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { Org } from '@salesforce/core';
 import { TestContext } from '@salesforce/core/testSetup';
@@ -13,6 +12,14 @@ import SegmentMembersExport, {
   sanitizeFilename,
 } from '../../../../../src/commands/mcnext/segment/members/export.js';
 import { resolveSegmentApiName } from '../../../../../src/segment/segmentMembers.js';
+
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+  type RunOwnedTemp,
+} from '../../../../../src/filesystem/runOwnedTemp.js';
 
 type RequestOptions = Parameters<McnClient['requestAll']>[0];
 type PageOptions = Parameters<McnClient['requestPages']>[0];
@@ -53,15 +60,27 @@ function clientWith(options: FakeClientOptions): McnClient {
 
 describe('mcnext segment members export', () => {
   const $$ = new TestContext();
+  let run: RunOwnedTemp;
   let directory: string;
+  let siblingSentinel: string;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'mcnext-segment-members-'));
+    run = await createRunOwnedTemp('mcnext-segment-members');
+    directory = await createRunOwnedDirectory(run, 'fixture');
+    siblingSentinel = join(run.root, 'sibling-sentinel.txt');
+    await writeFile(siblingSentinel, 'keep', 'utf8');
   });
 
   afterEach(async () => {
     $$.restore();
-    await rm(directory, { recursive: true, force: true });
+    await removeRunOwnedPath(run, directory);
+    const childError = await stat(directory).catch((error: NodeJS.ErrnoException) => error);
+    expect(childError).to.have.property('code', 'ENOENT');
+    expect(await readFile(siblingSentinel, 'utf8')).to.equal('keep');
+    await unlink(siblingSentinel);
+    await removeRunOwnedRoot(run);
+    const rootError = await stat(run.root).catch((error: NodeJS.ErrnoException) => error);
+    expect(rootError).to.have.property('code', 'ENOENT');
   });
 
   it('allocates stable unique labels and preserves API-name order', () => {
@@ -77,9 +96,7 @@ describe('mcnext segment members export', () => {
 
   it('formats DATE and DATETIME values without timezone loss and preserves nulls', () => {
     expect(normalizeFieldValue('1982-12-16T00:00:00+00:00', 'DATE')).to.equal('1982-12-16');
-    expect(normalizeFieldValue('2026-10-01T13:15:16.123+02:00', 'DateTime')).to.equal(
-      '2026-10-01 13:15:16.123+02:00'
-    );
+    expect(normalizeFieldValue('2026-10-01T13:15:16.123+02:00', 'DateTime')).to.equal('2026-10-01 13:15:16.123+02:00');
     expect(normalizeFieldValue(null, 'DATE')).to.equal(null);
     expect(normalizeFieldValue('not-a-date', 'DATE')).to.equal('not-a-date');
   });
@@ -356,7 +373,10 @@ describe('mcnext segment members export', () => {
     const previousCwd = process.cwd();
     process.chdir(directory);
     try {
-      const client = clientWith({ segments: [{ apiName: 'Annual_Promo', displayName: 'Annual: Promo?' }], pages: [[]] });
+      const client = clientWith({
+        segments: [{ apiName: 'Annual_Promo', displayName: 'Annual: Promo?' }],
+        pages: [[]],
+      });
       const first = await exportSegmentMembers({
         client,
         segment: 'Annual: Promo?',
@@ -404,9 +424,9 @@ describe('mcnext segment members export', () => {
 
       const destinationName = result.outputFile.split(/[\\/]/u).at(-1) as string;
       expect(filesDuringWrite).to.include(destinationName);
-      expect(filesDuringWrite.some((name) => name.startsWith(`.${destinationName}.`) && name.endsWith('.stage'))).to.equal(
-        true
-      );
+      expect(
+        filesDuringWrite.some((name) => name.startsWith(`.${destinationName}.`) && name.endsWith('.stage'))
+      ).to.equal(true);
       expect(await readdir(directory)).to.deep.equal([destinationName]);
       expect(JSON.parse(await readFile(result.outputFile, 'utf8'))).to.deep.equal([{ id: 'opaque-1' }]);
     } finally {
@@ -665,19 +685,21 @@ describe('mcnext segment members export', () => {
               { name: 'membership_key_internal' },
               { name: 'detail_match_count_internal' },
             ],
-            data: [[
-              ...columns.map((_, index) =>
-                index === 1
-                  ? null
-                  : index === 3
+            data: [
+              [
+                ...columns.map((_, index) =>
+                  index === 1
+                    ? null
+                    : index === 3
                     ? '1982-12-16T00:00:00+00:00'
                     : index === 4
-                      ? '2026-10-01T13:15:16.123+02:00'
-                      : `value-${index}`
-              ),
-              'membership-1',
-              1,
-            ]],
+                    ? '2026-10-01T13:15:16.123+02:00'
+                    : `value-${index}`
+                ),
+                'membership-1',
+                1,
+              ],
+            ],
             totalSize: 1,
           };
         },

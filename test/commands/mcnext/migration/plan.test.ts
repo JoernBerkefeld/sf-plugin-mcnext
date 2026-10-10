@@ -1,5 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { TestContext } from '@salesforce/core/testSetup';
 import { Org } from '@salesforce/core';
@@ -7,6 +6,13 @@ import { stubSfCommandUx } from '@salesforce/sf-plugins-core';
 import { expect } from 'chai';
 import MigrationPlanCommand, { cmsPlanningServices } from '../../../../src/commands/mcnext/migration/plan.js';
 import { cloneFixture, validExportFixture, validInfoFixture } from '../../../cms/contractFixtures.js';
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+  type RunOwnedTemp,
+} from '../../../../src/filesystem/runOwnedTemp.js';
 
 function fakeOrg(orgId: string, maximum = '67.0'): Org {
   return {
@@ -20,12 +26,17 @@ function fakeOrg(orgId: string, maximum = '67.0'): Org {
 
 describe('mcnext migration plan', () => {
   const $$ = new TestContext();
+  let run: RunOwnedTemp;
   let directory: string;
+  let sentinel: string;
   let ux: ReturnType<typeof stubSfCommandUx>;
 
   beforeEach(async () => {
     ux = stubSfCommandUx($$.SANDBOX);
-    directory = await mkdtemp(join(tmpdir(), 'mcnext-command-plan-'));
+    run = await createRunOwnedTemp('mcnext-command-plan');
+    directory = await createRunOwnedDirectory(run, 'fixture');
+    sentinel = join(run.root, 'sibling-sentinel.txt');
+    await writeFile(sentinel, 'keep', 'utf8');
     $$.SANDBOX.stub(Org, 'create').callsFake(async (options?: object) => {
       const aliasOrUsername = (options as { aliasOrUsername?: string } | undefined)?.aliasOrUsername;
       return fakeOrg(aliasOrUsername === 'source' ? '00Dsource' : '00Dtarget');
@@ -34,7 +45,14 @@ describe('mcnext migration plan', () => {
 
   afterEach(async () => {
     $$.restore();
-    await rm(directory, { recursive: true, force: true });
+    await removeRunOwnedPath(run, directory);
+    const childError = await stat(directory).catch((error: NodeJS.ErrnoException) => error);
+    expect(childError).to.have.property('code', 'ENOENT');
+    expect(await readFile(sentinel, 'utf8')).to.equal('keep');
+    await unlink(sentinel);
+    await removeRunOwnedRoot(run);
+    const rootError = await stat(run.root).catch((error: NodeJS.ErrnoException) => error);
+    expect(rootError).to.have.property('code', 'ENOENT');
   });
 
   it('writes and returns a read-only deterministic plan contract', async () => {
@@ -416,7 +434,9 @@ describe('mcnext migration plan', () => {
     expect(plan.cmsPlanning.routes.find((route) => route.sourceWorkspaceId === '0ZuSource')!.state).to.equal(
       'ready-for-execution'
     );
-    expect(plan.cmsPlanning.routes.find((route) => route.sourceWorkspaceId === '0ZuPartial')!.state).to.equal('blocked');
+    expect(plan.cmsPlanning.routes.find((route) => route.sourceWorkspaceId === '0ZuPartial')!.state).to.equal(
+      'blocked'
+    );
     expect(plan.cmsPlanning.diagnostics).to.deep.include({
       code: 'WORKSPACE_EXPORT_FAILED',
       message: 'Another workspace was incomplete.',
@@ -448,11 +468,11 @@ describe('mcnext migration plan', () => {
       $$.SANDBOX.stub(cmsPlanningServices, 'runInfo').resolves({
         envelope: cloneFixture(validInfoFixture),
         capabilities: {
-        bulkExport: 'implemented',
-        externalReferenceCorrelation: 'experimental',
-        workspaceImport: 'experimental',
-        experimental: true,
-      },
+          bulkExport: 'implemented',
+          externalReferenceCorrelation: 'experimental',
+          workspaceImport: 'experimental',
+          experimental: true,
+        },
       });
       $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
       const validate = $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage');
@@ -522,7 +542,7 @@ describe('mcnext migration plan', () => {
     });
     $$.SANDBOX.stub(cmsPlanningServices, 'runExport').resolves(exported);
     $$.SANDBOX.stub(cmsPlanningServices, 'validatePackage').callsFake(async (_root, _envelope, workspace) => {
-      if (workspace.source.sourceId === '0ZuSource') {
+      if (workspace.source.sourceId === '0ZuSource' && workspace.artifact !== null) {
         return {
           sourceWorkspaceId: '0ZuSource',
           artifactPath: 'a',

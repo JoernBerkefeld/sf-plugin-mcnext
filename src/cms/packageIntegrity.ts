@@ -97,6 +97,7 @@ export async function validateCmsPackageEvidence(
   limits: CmsPackageIntegrityLimits = {}
 ): Promise<ValidatedCmsPackage> {
   if (envelope.result === null) throw integrityError('export result is unavailable');
+  if (workspace.artifact === null) throw integrityError('workspace artifact is unavailable');
   const bounded = normalizeLimits(limits);
   const root = resolve(exportRoot);
   const rootStat = await safeLstat(root, 'export root');
@@ -301,6 +302,7 @@ function bindManifest(
   envelope: CmsEnvelope<CmsExportResult>,
   workspace: CmsExportWorkspace
 ): void {
+  if (workspace.artifact === null) throw integrityError('workspace artifact is unavailable');
   if (
     manifest.contract !== workspace.artifact.manifestContract ||
     manifest.contractVersion !== workspace.artifact.manifestContractVersion

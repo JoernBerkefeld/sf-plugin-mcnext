@@ -29,11 +29,89 @@ export type CampaignSelection = {
   artifact?: CampaignArtifact;
   journalFile?: string;
 };
-export type CampaignResult = {
-  operation: CampaignSelection['operation'];
-  targetId: string;
-  artifact: CampaignArtifact;
+export type CampaignSnapshot = Record<string, unknown> & { Id: string };
+export type CampaignExportDiagnostics = {
+  snapshot: 'complete' | 'incomplete';
+  omittedFields: string[];
+  associatedArtifacts: {
+    status: 'complete' | 'incomplete' | 'blocked';
+    reason: string;
+    flows?: Array<{
+      record: Record<string, unknown>;
+      status: 'complete' | 'blocked';
+      reason?: string;
+      toolingDefinition?: Record<string, unknown>;
+      toolingFlow?: Record<string, unknown>;
+    }>;
+  };
 };
+export type CampaignResult =
+  | { operation: 'create' | 'update'; targetId: string; artifact: CampaignArtifact }
+  | {
+      operation: 'export';
+      targetId: string;
+      artifact: CampaignSnapshot;
+      diagnostics: CampaignExportDiagnostics;
+    };
+
+function exportSnapshot(
+  describe: Record<string, unknown>,
+  record: Record<string, unknown>,
+  id: string
+): { artifact: CampaignSnapshot; diagnostics: CampaignExportDiagnostics } {
+  if (
+    describe.name !== 'Campaign' ||
+    describe.queryable !== true ||
+    !Array.isArray(describe.fields) ||
+    !describe.fields.length ||
+    !describe.fields.every(
+      (field: unknown) =>
+        object(field) &&
+        typeof field.name === 'string' &&
+        /^[A-Za-z][A-Za-z0-9_]*$/.test(field.name) &&
+        field.name !== 'attributes' &&
+        typeof field.type === 'string' &&
+        field.type.length > 0
+    )
+  )
+    throw new Error('Campaign export schema is unavailable or malformed');
+  const names = (describe.fields as Array<{ name: string }>).map((field) => field.name).sort();
+  if (!names.includes('Id') || new Set(names).size !== names.length)
+    throw new Error('Campaign export schema lacks canonical Id or contains duplicate fields');
+  if (!campaignId(record.Id) || record.Id !== id) throw new Error('Campaign export canonical identity mismatch');
+  const omittedFields = names.filter((name) => !Object.hasOwn(record, name));
+  const artifact: CampaignSnapshot = {
+    Id: id,
+    ...Object.fromEntries(
+      names
+        .filter((name) => name !== 'Id' && Object.hasOwn(record, name))
+        .map((name) => [name, copySnapshotValue(record[name])])
+    ),
+  };
+  return {
+    artifact,
+    diagnostics: {
+      snapshot: omittedFields.length ? 'incomplete' : 'complete',
+      omittedFields,
+      associatedArtifacts: {
+        status: 'blocked',
+        reason:
+          'Associated Flow and per-flow Segment discovery is not implemented in this flat-snapshot slice; this is not a full backup',
+      },
+    },
+  };
+}
+
+function copySnapshotValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(copySnapshotValue);
+  if (object(value))
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => key !== 'attributes')
+        .map(([key, entry]) => [key, copySnapshotValue(entry)])
+    );
+  return value;
+}
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -166,7 +244,170 @@ function saveId(saved: Record<string, unknown>, s: CampaignSelection): string {
     throw new Error('Ambiguous Campaign mutation result; reconcile before retrying');
   return saved.id;
 }
-/** Closed scalar configuration adapter. Relationships are deliberately unsupported, never inferred. */
+type CampaignRead = (args: string[]) => Promise<Record<string, unknown>>;
+function validateFlowReference(record: Record<string, unknown>, selected: string[]): void {
+  if (selected.some((field) => !Object.hasOwn(record, field)))
+    throw new Error('FlowRecord projection is incomplete; missing is not null');
+  if (typeof record.ApiName !== 'string' || !/^[A-Za-z][A-Za-z0-9_]*$/.test(record.ApiName))
+    throw new Error('FlowRecord API member identity is missing or malformed');
+  if (
+    record.SegmentId !== null &&
+    (typeof record.SegmentId !== 'string' || !/^1sg[A-Za-z0-9]{15}$/.test(record.SegmentId))
+  )
+    throw new Error('FlowRecord SegmentId is empty or malformed; preserved without inference');
+  for (const field of ['ActiveVersionId', 'LatestVersionId']) {
+    if (
+      Object.hasOwn(record, field) &&
+      record[field] !== null &&
+      (typeof record[field] !== 'string' || !/^10v[A-Za-z0-9]{15}$/.test(record[field]))
+    )
+      throw new Error('Core FlowRecordVersion identity is malformed; never a Tooling Flow identity');
+  }
+}
+function validateToolingDefinition(definition: Record<string, unknown>, member: unknown): void {
+  if (
+    typeof definition.Id !== 'string' ||
+    !/^300[A-Za-z0-9]{15}$/.test(definition.Id) ||
+    definition.DeveloperName !== member
+  )
+    throw new Error('Tooling definition identity mismatch');
+  for (const field of ['ActiveVersionId', 'LatestVersionId']) {
+    if (
+      !Object.hasOwn(definition, field) ||
+      (definition[field] !== null &&
+        (typeof definition[field] !== 'string' || !/^301[A-Za-z0-9]{15}$/.test(definition[field])))
+    )
+      throw new Error('Tooling version identity is missing or malformed');
+  }
+  if (definition.LatestVersionId === null)
+    throw new Error('Tooling latest version is null; no version inferred from core active version');
+}
+
+/** Discover source-owned references only; native artifact retrieval and persistence are separate work. */
+async function discoverAssociations(
+  describe: Record<string, unknown>,
+  campaign: string,
+  call: CampaignRead
+): Promise<CampaignExportDiagnostics['associatedArtifacts']> {
+  const flows: NonNullable<CampaignExportDiagnostics['associatedArtifacts']['flows']> = [];
+  const reason =
+    'References only: native Flow/SegmentDefinition artifacts and Campaign association persistence are not exported; not a full backup';
+  try {
+    if (
+      !Array.isArray(describe.childRelationships) ||
+      describe.childRelationships.filter(
+        (child: unknown) =>
+          object(child) &&
+          child.relationshipName === 'Flows' &&
+          child.childSObject === 'FlowRecord' &&
+          child.field === 'AssociatedRecordId'
+      ).length !== 1
+    )
+      throw new Error('Campaign.Flows relationship schema is unavailable or ambiguous');
+    const schema = async (name: string, required: string[], tooling = false): Promise<Set<string>> => {
+      const value = await call(['sobject', 'describe', '--sobject', name, ...(tooling ? ['--use-tooling-api'] : [])]);
+      if (
+        value.name !== name ||
+        value.queryable !== true ||
+        !Array.isArray(value.fields) ||
+        !value.fields.every(
+          (field: unknown) =>
+            object(field) && typeof field.name === 'string' && /^[A-Za-z][A-Za-z0-9_]*$/.test(field.name)
+        )
+      )
+        throw new Error(`${name} query schema is unavailable or malformed`);
+      const names = value.fields.map((field: Record<string, unknown>) => String(field.name));
+      if (new Set(names).size !== names.length || required.some((field) => !names.includes(field)))
+        throw new Error(`${name} query schema lacks required fields or is ambiguous`);
+      return new Set(names);
+    };
+    const query = async (soql: string, tooling = false): Promise<Array<Record<string, unknown>>> => {
+      const value = await call(['data', 'query', '--query', soql, ...(tooling ? ['--use-tooling-api'] : [])]);
+      if (
+        value.done !== true ||
+        !Array.isArray(value.records) ||
+        !Number.isSafeInteger(value.totalSize) ||
+        value.totalSize !== value.records.length ||
+        value.records.length > 100 ||
+        !value.records.every(object)
+      )
+        throw new Error('Incomplete association query (completed count required; maximum 100 rows)');
+      return value.records;
+    };
+    const required = ['Id', 'ApiName', 'AssociatedRecordId', 'SegmentId'];
+    const names = await schema('FlowRecord', required);
+    const selected = [...required, ...['ActiveVersionId', 'LatestVersionId'].filter((field) => names.has(field))];
+    const records = await query(
+      `SELECT ${selected.join(', ')} FROM FlowRecord WHERE AssociatedRecordId = '${campaign}' ORDER BY Id LIMIT 101`
+    );
+    const seen = new Set<string>();
+    for (const record of records) {
+      if (
+        typeof record.Id !== 'string' ||
+        !/^2aF[A-Za-z0-9]{15}$/.test(record.Id) ||
+        seen.has(record.Id) ||
+        record.AssociatedRecordId !== campaign
+      )
+        throw new Error('Ambiguous or mismatched FlowRecord association identity');
+      seen.add(record.Id);
+      flows.push({
+        record: Object.fromEntries(
+          selected.filter((field) => Object.hasOwn(record, field)).map((field) => [field, record[field]])
+        ),
+        status: 'blocked',
+      });
+    }
+    if (!flows.length) return { status: 'complete', reason, flows };
+    await schema('FlowDefinition', ['Id', 'DeveloperName', 'ActiveVersionId', 'LatestVersionId'], true);
+    await schema('Flow', ['Id', 'DefinitionId', 'Metadata'], true);
+    await flows.reduce(async (previous, entry) => {
+      await previous;
+      const flow = entry;
+      try {
+        const record = flow.record;
+        validateFlowReference(record, selected);
+        const definitions = await query(
+          `SELECT Id, DeveloperName, ActiveVersionId, LatestVersionId FROM FlowDefinition WHERE DeveloperName = '${String(
+            record.ApiName
+          )}' LIMIT 2`,
+          true
+        );
+        if (definitions.length !== 1) throw new Error('Tooling definition member correlation is absent or ambiguous');
+        const definition = definitions[0];
+        flow.toolingDefinition = definition;
+        validateToolingDefinition(definition, record.ApiName);
+        const versions = await query(
+          `SELECT Id, DefinitionId, Metadata FROM Flow WHERE Id = '${String(definition.LatestVersionId)}' LIMIT 2`,
+          true
+        );
+        if (
+          versions.length !== 1 ||
+          versions[0].Id !== definition.LatestVersionId ||
+          versions[0].DefinitionId !== definition.Id ||
+          !object(versions[0].Metadata)
+        )
+          throw new Error('Tooling latest Flow correlation is absent, ambiguous or incomplete');
+        flow.toolingFlow = versions[0];
+        const start = versions[0].Metadata.start;
+        if (!object(start) || typeof start.triggerType !== 'string' || !start.triggerType.length)
+          throw new Error('Tooling Flow start configuration is incomplete');
+        if (
+          start.triggerType === 'Segment' &&
+          (!Object.hasOwn(start, 'segment') || typeof start.segment !== 'string' || !start.segment.length)
+        )
+          throw new Error('Tooling Flow segment selection is missing or empty');
+        flow.status = 'complete';
+      } catch (error) {
+        flow.reason = String(error);
+      }
+    }, Promise.resolve());
+    return { status: flows.every((flow) => flow.status === 'complete') ? 'complete' : 'incomplete', reason, flows };
+  } catch (error) {
+    return { status: flows.length ? 'incomplete' : 'blocked', reason: `${String(error)}; ${reason}`, flows };
+  }
+}
+
+/** Describe-driven read snapshots; mutations retain the closed scalar configuration contract. */
 export async function runCampaign(s: CampaignSelection, runner: CoreRunner = runCore): Promise<CampaignResult> {
   validateSelection(s);
   const payload = buildPayload(s);
@@ -224,10 +465,13 @@ export async function runCampaign(s: CampaignSelection, runner: CoreRunner = run
       );
   };
   if (s.operation === 'export') {
-    const record = await get(s.recordId!);
-    if (relationships.some((field) => record[field] !== null && record[field] !== undefined))
-      throw new Error('Unsupported Campaign relationships; explicit target-local mapping is not implemented');
-    return { operation: s.operation, targetId: s.recordId!, artifact: artifact(record) };
+    const describe = await call(['sobject', 'describe', '--sobject', 'Campaign']);
+    // Validate the schema before reading; GET preserves compound values and present nulls.
+    exportSnapshot(describe, { Id: s.recordId }, s.recordId!);
+    const record = await call(['data', 'get', 'record', '--sobject', 'Campaign', '--record-id', s.recordId!]);
+    const snapshot = exportSnapshot(describe, record, s.recordId!);
+    snapshot.diagnostics.associatedArtifacts = await discoverAssociations(describe, s.recordId!, call);
+    return { operation: s.operation, targetId: s.recordId!, ...snapshot };
   }
   const describe = await call(['sobject', 'describe', '--sobject', 'Campaign']);
   const definitions = validateFields(describe, payload, s.operation);

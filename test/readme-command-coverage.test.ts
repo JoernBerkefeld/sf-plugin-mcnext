@@ -98,6 +98,16 @@ const constraintExpectations: Record<string, Record<string, ConstraintExpectatio
     },
     'output-file': { expected: ['Deterministic JSON migration plan', 'overwritten'] },
   },
+  'mcnext:retrieve:all': {
+    'target-org': {
+      required: 'Yes',
+      expected: ['Explicit authenticated org alias or username', 'no configured default'],
+    },
+    'expected-org-id': { required: 'Yes', expected: ['Verified exact 18-character Salesforce org ID'] },
+    'project-dir': { required: 'Yes', expected: ['Existing DX project root', 'exactly one default package directory'] },
+    'api-version': { expected: ['Only `67.0`'] },
+    wait: { expected: ['Integer 1–30'] },
+  },
   'mcnext:segment:definition:create': {
     'dry-run': { required: 'No', expected: ['default `false`', 'stops before apply'] },
     'mapping-file': { expected: ['JSON', 'resolved from project directory'] },
@@ -188,7 +198,7 @@ describe('README public command coverage', () => {
     const manifest = JSON.parse(manifestText) as Manifest;
     const commands = Object.values(manifest.commands);
 
-    expect(commands).to.have.length(15);
+    expect(commands).to.have.length(16);
     expect(readme).to.include('## Common inherited options');
     expect(readme).to.include('--json');
     expect(readme).to.include('--flags-dir <directory>');

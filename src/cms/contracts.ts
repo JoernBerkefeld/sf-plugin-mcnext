@@ -52,7 +52,11 @@ export type CmsInfoResult = {
   plugin: { name: typeof CMS_PLUGIN_NAME; version: string };
   api: { defaultVersion: string; testedVersions: string[] };
   contracts: {
-    commandResults: { info: string[]; workspaceExportSet: string[]; workspaceImport: string[] };
+    commandResults: Record<string, string[]> & {
+      info: string[];
+      workspaceExportSet: string[];
+      workspaceImport: string[];
+    };
     packageManifests: { workspaceExport: string[] };
     embeddedResults: { externalReferenceCorrelations: [typeof CMS_CORRELATION_CONTRACT] };
     compatibility: Record<string, { workspaceExportManifestMajors: number[] }> & {
@@ -96,18 +100,21 @@ export type CmsExternalReferenceCorrelation = {
   packageManifestSha256: string;
 };
 
+export type CmsExportArtifact = {
+  path: string;
+  manifestPath: string;
+  manifestContract: 'sf-cms-workspace-export';
+  manifestContractVersion: string;
+  manifestSha256: string;
+};
+
 export type CmsExportWorkspace = {
   source: { kind: 'cms.workspace'; sourceId: string; name: string; workspaceType: 'Marketing' };
-  status: CmsStatus;
-  artifact: {
-    path: string;
-    manifestPath: string;
-    manifestContract: 'sf-cms-workspace-export';
-    manifestContractVersion: string;
-    manifestSha256: string;
-  };
   diagnostics: CmsDiagnostics;
-};
+} & (
+  | { status: 'success' | 'partial' | 'blocked'; artifact: CmsExportArtifact }
+  | { status: 'failed'; artifact: CmsExportArtifact | null }
+);
 
 export type CmsExportResult = {
   workspaceType: 'Marketing';
@@ -237,8 +244,8 @@ export function validateCmsRegistryInfo(value: unknown): {
 export function validateCmsExport(value: unknown): CmsEnvelope<CmsExportResult> {
   const envelope = validateEnvelope(value, 'workspace.export.bulk', CMS_EXPORT_CONTRACT, validateExportResult);
   if (envelope.provenance.command !== CMS_EXPORT_COMMAND) throw contractError('export command provenance');
-  if (envelope.provenance.exportSetId === undefined) throw contractError('exportSetId is required for export');
   if (envelope.result === null) return envelope;
+  if (envelope.provenance.exportSetId === undefined) throw contractError('exportSetId is required for export');
   if (envelope.provenance.pluginVersion !== envelope.metadata.plugin.version)
     throw contractError('provenance plugin version');
 
@@ -248,7 +255,7 @@ export function validateCmsExport(value: unknown): CmsEnvelope<CmsExportResult> 
   const referenceBindings = new Map<string, string>();
   for (const row of envelope.result.externalReferenceCorrelations) {
     const workspace = workspaces.get(row.sourceWorkspaceId);
-    if (!workspace) throw contractError('correlation workspace binding');
+    if (!workspace || workspace.artifact === null) throw contractError('correlation workspace binding');
     if (workspace.artifact.manifestSha256 !== row.packageManifestSha256)
       throw contractError('correlation package binding');
     const sourceKey = `${row.sourceWorkspaceId}\0${row.sourceReference}`;
@@ -352,7 +359,7 @@ function validateInfoResult(value: unknown): CmsInfoResult {
     ['commandResults', 'packageManifests', 'embeddedResults', 'compatibility'],
     'contracts'
   );
-  const commandResults = strictRecord(
+  const commandResults = extensibleRecord(
     contracts.commandResults,
     ['info', 'workspaceExportSet', 'workspaceImport'],
     'command results'
@@ -386,9 +393,19 @@ function validateInfoResult(value: unknown): CmsInfoResult {
     },
     contracts: {
       commandResults: {
-        info: stringArray(commandResults.info, 'info versions'),
-        workspaceExportSet: stringArray(commandResults.workspaceExportSet, 'export versions'),
-        workspaceImport: stringArray(commandResults.workspaceImport, 'import versions'),
+        ...Object.fromEntries(
+          Object.entries(commandResults).map(([name, versions]) => [
+            name,
+            array(versions, `${name} versions`).map((item) => version(item, `${name} version`)),
+          ])
+        ),
+        info: array(commandResults.info, 'info versions').map((item) => version(item, 'info version')),
+        workspaceExportSet: array(commandResults.workspaceExportSet, 'export versions').map((item) =>
+          version(item, 'export version')
+        ),
+        workspaceImport: array(commandResults.workspaceImport, 'import versions').map((item) =>
+          version(item, 'import version')
+        ),
       },
       packageManifests: { workspaceExport: stringArray(packageManifests.workspaceExport, 'manifest versions') },
       embeddedResults: { externalReferenceCorrelations: [CMS_CORRELATION_CONTRACT] },
@@ -425,7 +442,8 @@ function validateInfoResultV2(value: unknown): CmsInfoResultV2 {
       (entry) =>
         `${entry.identity.provider}\0${entry.identity.family}\0${entry.identity.type}\0${entry.identity.profile}`
     ),
-    'registry declarations'
+    'registry declarations',
+    true
   );
   return {
     ...info,
@@ -540,11 +558,11 @@ function validateExportConsistency(envelope: CmsEnvelope<CmsExportResult>): void
       : 'success';
   if (envelope.status !== expectedStatus) throw contractError('export status must match summary');
   requireUnique(
-    result.workspaces.map((workspace) => workspace.artifact.path),
+    result.workspaces.flatMap((workspace) => (workspace.artifact === null ? [] : [workspace.artifact.path])),
     'artifact path'
   );
   requireUnique(
-    result.workspaces.map((workspace) => workspace.artifact.manifestPath),
+    result.workspaces.flatMap((workspace) => (workspace.artifact === null ? [] : [workspace.artifact.manifestPath])),
     'manifest path'
   );
 }
@@ -597,6 +615,18 @@ function validateWorkspace(value: unknown): CmsExportWorkspace {
   const source = strictRecord(record.source, ['kind', 'sourceId', 'name', 'workspaceType'], 'workspace source');
   exact(source.kind, 'cms.workspace', 'workspace source kind');
   exact(source.workspaceType, 'Marketing', 'workspace source type');
+  const sourceIdentity: CmsExportWorkspace['source'] = {
+    kind: 'cms.workspace',
+    sourceId: nonempty(source.sourceId, 'sourceId'),
+    name: nonempty(source.name, 'workspace name'),
+    workspaceType: 'Marketing',
+  };
+  const status = oneOf(record.status, ['success', 'partial', 'failed', 'blocked'] as const, 'workspace status');
+  const diagnostics = validateDiagnostics(record.diagnostics);
+  if (record.artifact === null) {
+    if (status !== 'failed') throw contractError('workspace artifact is required');
+    return { source: sourceIdentity, status, artifact: null, diagnostics };
+  }
   const artifact = strictRecord(
     record.artifact,
     ['path', 'manifestPath', 'manifestContract', 'manifestContractVersion', 'manifestSha256'],
@@ -605,13 +635,8 @@ function validateWorkspace(value: unknown): CmsExportWorkspace {
   exact(artifact.manifestContract, 'sf-cms-workspace-export', 'manifest contract');
   versionMajor(artifact.manifestContractVersion, 1, 'manifest contract version');
   return {
-    source: {
-      kind: 'cms.workspace',
-      sourceId: nonempty(source.sourceId, 'sourceId'),
-      name: nonempty(source.name, 'workspace name'),
-      workspaceType: 'Marketing',
-    },
-    status: oneOf(record.status, ['success', 'partial', 'failed', 'blocked'] as const, 'workspace status'),
+    source: sourceIdentity,
+    status,
     artifact: {
       path: relativePath(artifact.path, 'artifact path'),
       manifestPath: relativePath(artifact.manifestPath, 'manifest path'),
@@ -619,7 +644,7 @@ function validateWorkspace(value: unknown): CmsExportWorkspace {
       manifestContractVersion: string(artifact.manifestContractVersion, 'manifest contract version'),
       manifestSha256: sha256(artifact.manifestSha256, 'manifestSha256'),
     },
-    diagnostics: validateDiagnostics(record.diagnostics),
+    diagnostics,
   };
 }
 
@@ -873,8 +898,8 @@ function requireMajor(versions: string[], expected: number, label: string): void
     throw contractError(`${label} major is unsupported`);
 }
 
-function requireUniqueCanonicalOrder(values: string[], label: string): void {
-  const sorted = [...values].sort((left, right) => left.localeCompare(right));
+function requireUniqueCanonicalOrder(values: string[], label: string, lexical = false): void {
+  const sorted = lexical ? [...values].sort() : [...values].sort((left, right) => left.localeCompare(right));
   if (new Set(values).size !== values.length) throw contractError(`${label} must be unique`);
   if (values.some((value, index) => value !== sorted[index]))
     throw contractError(`${label} must be canonically ordered`);

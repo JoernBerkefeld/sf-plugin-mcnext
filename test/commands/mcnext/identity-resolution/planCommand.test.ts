@@ -1,10 +1,16 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { lstat, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect } from 'chai';
 import IdentityResolutionPlanCommand, {
   identityResolutionPlanServices,
 } from '../../../../src/commands/mcnext/identity-resolution/plan.js';
+import {
+  createRunOwnedDirectory,
+  createRunOwnedTemp,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+  type RunOwnedTemp,
+} from '../../../../src/filesystem/runOwnedTemp.js';
 
 const sourceOrgId = '00D000000000001AAA';
 const targetOrgId = '00D000000000002AAA';
@@ -21,14 +27,19 @@ const fixture = {
 };
 
 describe('mcnext identity-resolution plan command', () => {
+  let run: RunOwnedTemp;
   let directory: string;
+  let sentinel: string;
   const originalResolve = identityResolutionPlanServices.resolveExpectedOrgIdentity;
   const originalReadInput = identityResolutionPlanServices.readInput;
   const originalCreateOrg = identityResolutionPlanServices.createOrg;
   const originalCreate = identityResolutionPlanServices.createClient;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'mcnext-identity-plan-command-'));
+    run = await createRunOwnedTemp('mcnext-identity-plan-command');
+    directory = await createRunOwnedDirectory(run, 'fixture');
+    sentinel = join(run.root, 'sentinel.txt');
+    await writeFile(sentinel, 'sibling-survives');
   });
 
   afterEach(async () => {
@@ -36,7 +47,12 @@ describe('mcnext identity-resolution plan command', () => {
     identityResolutionPlanServices.readInput = originalReadInput;
     identityResolutionPlanServices.createOrg = originalCreateOrg;
     identityResolutionPlanServices.createClient = originalCreate;
-    await rm(directory, { recursive: true, force: true });
+    await removeRunOwnedPath(run, directory);
+    expect(await lstat(directory).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
+    expect(await readFile(sentinel, 'utf8')).to.equal('sibling-survives');
+    await unlink(sentinel);
+    await removeRunOwnedRoot(run);
+    expect(await lstat(run.root).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
   });
 
   it('requires explicit intent and separate source and target identity guards before GET discovery', async () => {

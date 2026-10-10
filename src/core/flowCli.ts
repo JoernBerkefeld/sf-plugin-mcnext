@@ -10,6 +10,7 @@ export type FlowSelection = {
   members: string[];
   operation: FlowOperation;
   waitMinutes?: number;
+  apiVersion?: string;
 };
 export type CoreProcessResult = { stdout: string; exitCode: number };
 export type CoreRunner = (args: string[], projectRoot: string) => Promise<CoreProcessResult>;
@@ -49,6 +50,12 @@ export function buildFlowArgs(selection: FlowSelection): string[] {
     throw new Error('Select exact Flow API names; wildcards, paths and metadata type expressions are not supported');
   }
   if (new Set(selection.members).size !== selection.members.length) throw new Error('Duplicate Flow selection');
+  if (
+    selection.apiVersion !== undefined &&
+    (!/^\d{2,3}\.0$/.test(selection.apiVersion) || selection.apiVersion.trim() !== selection.apiVersion)
+  ) {
+    throw new Error('Flow API version must be an explicit version such as 67.0');
+  }
   const wait = selection.waitMinutes ?? 10;
   if (!Number.isSafeInteger(wait) || wait < 1 || wait > 30) throw new Error('Wait must be 1–30 minutes');
   return [
@@ -59,6 +66,7 @@ export function buildFlowArgs(selection: FlowSelection): string[] {
     selection.targetOrg,
     ...selection.members.flatMap((member) => ['--metadata', `Flow:${member}`]),
     ...(selection.operation === 'validate' ? ['--dry-run'] : []),
+    ...(selection.apiVersion === undefined ? [] : ['--api-version', selection.apiVersion]),
     '--wait',
     String(wait),
     '--json',

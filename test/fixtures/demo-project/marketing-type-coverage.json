@@ -1,0 +1,46 @@
+{
+  "scope": "User-supplied Marketing workspace UI labels; representative demos are not a complete catalog or evidence of provider support.",
+  "supportMeaning": "Unresolved means no retrieval/edit/deployment qualification asserted here. Existing local-candidate Email evidence does not qualify the installed MCNext provider.",
+  "types": [
+    { "label": "Audio", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "Brand", "apiFamily": "brand", "fileToken": "brand", "support": "unresolved" },
+    { "label": "Consent Banner", "apiFamily": "consentBanner", "fileToken": "consent-banner", "support": "unresolved" },
+    { "label": "Contact Card (VCF)", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    {
+      "label": "Content Block: Email",
+      "apiFamily": "emailFragment",
+      "fileToken": "email-fragment",
+      "support": "unresolved"
+    },
+    {
+      "label": "Content Block: Landing Page",
+      "apiFamily": "webFragment",
+      "fileToken": "web-fragment",
+      "support": "unresolved"
+    },
+    { "label": "Custom Font", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "Document", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "Email", "apiFamily": "email", "fileToken": "email", "support": "local-candidate-source-only" },
+    { "label": "Email Template", "apiFamily": "emailTemplate", "fileToken": "email-template", "support": "unresolved" },
+    { "label": "Expression", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "Form", "apiFamily": "form", "fileToken": "form", "support": "unresolved" },
+    { "label": "Form Handler", "apiFamily": "formHandler", "fileToken": "form-handler", "support": "unresolved" },
+    { "label": "Image", "apiFamily": "image", "fileToken": "image", "support": "unresolved" },
+    { "label": "In-App Message", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "Landing Page", "apiFamily": "landingPage", "fileToken": "landing-page", "support": "unresolved" },
+    {
+      "label": "Landing Page Template",
+      "apiFamily": "landingPageTemplate",
+      "fileToken": "landing-page-template",
+      "support": "unresolved"
+    },
+    { "label": "Preference Page", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "Push Notification Message", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "RCS Message", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "SMS and MMS", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "Tracked Link", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "Video", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "WhatsApp Session Message", "apiFamily": null, "fileToken": null, "support": "unresolved" },
+    { "label": "WhatsApp Template Message", "apiFamily": null, "fileToken": null, "support": "unresolved" }
+  ]
+}

@@ -1,7 +1,12 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { Builder } from 'xml2js';
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+} from '../filesystem/runOwnedTemp.js';
 import { OrgIdentityError, resolveExpectedOrgIdentity, type OrgIdentityResolver } from '../mutation/orgIdentity.js';
 import {
   applySegmentDefinitionMappings,
@@ -77,14 +82,17 @@ export async function createSegmentDefinition(
   const transformedXml = serializeDefinition(transformed);
   await assertTargetAbsent(selection.member, services.connect);
 
-  const isolated = await createIsolatedProject(packageDirectory, selection.member, transformedXml);
+  const run = await createRunOwnedTemp('mcnext-segment-create');
+  let root: string | undefined;
   let failure: unknown;
   let outcome: SegmentDefinitionCreateResult | undefined;
   try {
+    root = await createRunOwnedDirectory(run, 'project');
+    await populateIsolatedProject(root, packageDirectory, selection.member, transformedXml);
     const validation = parseSegmentCoreResult(
       'validate',
       selection.member,
-      await services.core(deployArgs(selection.targetOrg, selection.member, wait, true), isolated.root)
+      await services.core(deployArgs(selection.targetOrg, selection.member, wait, true), root)
     );
     if (selection.dryRun) {
       outcome = {
@@ -99,7 +107,7 @@ export async function createSegmentDefinition(
       const applied = parseSegmentCoreResult(
         'create',
         selection.member,
-        await services.core(deployArgs(selection.targetOrg, selection.member, wait, false), isolated.root)
+        await services.core(deployArgs(selection.targetOrg, selection.member, wait, false), root)
       );
       const retrieved = await retrieveIndependent(selection, packageDirectory, wait, services.core);
       const readback = await parseSegmentDefinitionXml(retrieved, selection.member, `${selection.member}${suffix}`);
@@ -125,10 +133,13 @@ export async function createSegmentDefinition(
     failure = error;
   }
   try {
-    await rm(isolated.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    if (root) await removeRunOwnedPath(run, root);
+    await removeRunOwnedRoot(run);
   } catch (error) {
     throw new Error(
-      `Segment Definition outcome: ${String(failure ?? outcome)}; scratch cleanup failed: ${String(error)}`
+      `Segment Definition outcome: ${failure ? String(failure) : JSON.stringify(outcome)}; scratch cleanup failed at ${
+        root ?? run.root
+      }: ${String(error)}`
     );
   }
   if (failure) throw failure;
@@ -191,8 +202,12 @@ async function loadSource(
   return { sourceXml: await readFile(sourceFile, 'utf8'), packageDirectory: owner.path };
 }
 
-async function createIsolatedProject(packageDirectory: string, member: string, xml: string): Promise<{ root: string }> {
-  const root = await mkdtemp(join(tmpdir(), 'mcnext-segment-create-'));
+async function populateIsolatedProject(
+  root: string,
+  packageDirectory: string,
+  member: string,
+  xml: string
+): Promise<void> {
   const folder = join(root, packageDirectory, 'main', 'default', 'marketSegmentDefinitions');
   await mkdir(folder, { recursive: true });
   await writeFile(
@@ -200,7 +215,6 @@ async function createIsolatedProject(packageDirectory: string, member: string, x
     JSON.stringify({ packageDirectories: [{ path: packageDirectory, default: true }] })
   );
   await writeFile(join(folder, `${member}${suffix}`), xml);
-  return { root };
 }
 
 function deployArgs(targetOrg: string, member: string, wait: number, dryRun: boolean): string[] {
@@ -233,8 +247,12 @@ async function retrieveIndependent(
   wait: number,
   core: SegmentCoreRunner
 ): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'mcnext-segment-readback-'));
+  const run = await createRunOwnedTemp('mcnext-segment-readback');
+  let root: string | undefined;
+  let xml: string | undefined;
+  let failure: unknown;
   try {
+    root = await createRunOwnedDirectory(run, 'project');
     await mkdir(join(root, packageDirectory), { recursive: true });
     await writeFile(
       join(root, 'sfdx-project.json'),
@@ -263,10 +281,22 @@ async function retrieveIndependent(
     const files = await readdir(folder);
     if (files.length !== 1 || files[0] !== `${selection.member}${suffix}`)
       throw new Error('Independent Segment Definition retrieval must materialize exactly one selected file');
-    return await readFile(join(folder, files[0]), 'utf8');
-  } finally {
-    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    xml = await readFile(join(folder, files[0]), 'utf8');
+  } catch (error) {
+    failure = error;
   }
+  try {
+    if (root) await removeRunOwnedPath(run, root);
+    await removeRunOwnedRoot(run);
+  } catch (error) {
+    throw new Error(
+      `Segment Definition readback outcome: ${
+        failure ? String(failure) : 'source materialized'
+      }; scratch cleanup failed at ${root ?? run.root}: ${String(error)}`
+    );
+  }
+  if (failure) throw failure;
+  return xml!;
 }
 
 async function correlateVisibility(

@@ -7,6 +7,8 @@ import { runCampaign, type CampaignArtifact, type CampaignResult } from '../../.
 Messages.importMessagesDirectoryFromMetaUrl(import.meta.url);
 const messages = Messages.loadMessages('sf-plugin-mcnext', 'mcnext.campaign.config');
 
+export const campaignConfigServices = { runCampaign };
+
 export default class CampaignConfig extends SfCommand<CampaignResult> {
   public static readonly summary = messages.getMessage('summary');
   public static readonly description = messages.getMessage('description');
@@ -38,7 +40,7 @@ export default class CampaignConfig extends SfCommand<CampaignResult> {
     const { flags: f } = await this.parse(CampaignConfig);
     if (f.operation === 'export' ? !f['output-file'] || f['input-file'] : !f['input-file'] || f['output-file'])
       throw new Error('Export requires output-file only; mutations require input-file only');
-    const result = await runCampaign({
+    const result = await campaignConfigServices.runCampaign({
       operation: f.operation,
       projectRoot: f['project-dir'],
       targetOrg: f['target-org'],
@@ -59,6 +61,7 @@ export default class CampaignConfig extends SfCommand<CampaignResult> {
         mode: 0o600,
       });
     this.log(`${result.operation}: ${result.targetId}`);
+    if (result.operation === 'export') this.log(`Export diagnostics: ${JSON.stringify(result.diagnostics)}`);
     return result;
   }
 }

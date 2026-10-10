@@ -1,9 +1,14 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect } from 'chai';
 import { Org } from '@salesforce/core';
 import { buildMigrationPlan, runMigrationPreflight, writeMigrationPlan } from '../../src/migration/migrationPlan.js';
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+} from '../../src/filesystem/runOwnedTemp.js';
 
 function org(
   orgId: string,
@@ -39,7 +44,11 @@ describe('migration plan', () => {
       org('00Dsource', '67.0', undefined, sourceVersions),
       org('00Dtarget', '68.0', undefined, targetVersions)
     );
-    expect(result).to.deep.include({ key: 'distinct-orgs', status: 'pass', message: 'Source and target are distinct orgs.' });
+    expect(result).to.deep.include({
+      key: 'distinct-orgs',
+      status: 'pass',
+      message: 'Source and target are distinct orgs.',
+    });
     expect(result.find((check) => check.key === 'source-api-v67')?.status).to.equal('pass');
     expect(result.find((check) => check.key === 'target-api-v67')?.status).to.equal('pass');
     expect(result.find((check) => check.key === 'target-environment')?.status).to.equal('manual');
@@ -155,7 +164,10 @@ describe('migration plan', () => {
       'userAssignments',
     ];
     expect(plan.inventory.map((item) => item.key)).to.deep.equal(expectedKeys);
-    expect(plan.inventory.find((item) => item.key === 'cmsArtifacts')).to.include({ owner: 'cms-service', status: 'deferred' });
+    expect(plan.inventory.find((item) => item.key === 'cmsArtifacts')).to.include({
+      owner: 'cms-service',
+      status: 'deferred',
+    });
     for (const key of [
       'authenticatedSendingDomains',
       'connectors',
@@ -172,13 +184,19 @@ describe('migration plan', () => {
       'targetPermissions',
       'userAssignments',
     ]) {
-      expect(plan.inventory.find((item) => item.key === key), key).to.include({
+      expect(
+        plan.inventory.find((item) => item.key === key),
+        key
+      ).to.include({
         owner: 'external/manual',
         status: 'manual prerequisite',
       });
     }
     for (const key of ['consentHistoryRows', 'crmAudienceRows', 'customerRows', 'dmoRows', 'operationalRows']) {
-      expect(plan.inventory.find((item) => item.key === key), key).to.include({
+      expect(
+        plan.inventory.find((item) => item.key === key),
+        key
+      ).to.include({
         owner: 'secondary-data',
         status: 'deferred',
         classification: 'secondary-data',
@@ -203,8 +221,18 @@ describe('migration plan', () => {
       targetOrgId: '00Dtarget',
       preflight: [],
       deferredCmsDependencies: [
-        { owner: 'cms-service', status: 'deferred: cms-service-contract', sourceReference: 'z', blockedOperation: 'listEmail.deploy' },
-        { owner: 'cms-service', status: 'deferred: cms-service-contract', sourceReference: 'a', blockedOperation: 'campaign.deploy' },
+        {
+          owner: 'cms-service',
+          status: 'deferred: cms-service-contract',
+          sourceReference: 'z',
+          blockedOperation: 'listEmail.deploy',
+        },
+        {
+          owner: 'cms-service',
+          status: 'deferred: cms-service-contract',
+          sourceReference: 'a',
+          blockedOperation: 'campaign.deploy',
+        },
       ],
     });
     expect(plan.deferredCmsDependencies[0]).to.deep.equal({
@@ -222,7 +250,10 @@ describe('migration plan', () => {
   });
 
   it('writes byte-stable JSON for identical inputs', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'mcnext-plan-'));
+    const run = await createRunOwnedTemp('mcnext-plan');
+    const directory = await createRunOwnedDirectory(run, 'fixtures');
+    const sentinel = join(run.root, 'sentinel.txt');
+    await writeFile(sentinel, 'preserve outside fixture child\n');
     try {
       const plan = buildMigrationPlan({ sourceOrgId: '00Dsource', targetOrgId: '00Dtarget', preflight: [] });
       const first = join(directory, 'first.json');
@@ -231,7 +262,15 @@ describe('migration plan', () => {
       await writeMigrationPlan(plan, second);
       expect(await readFile(first, 'utf8')).to.equal(await readFile(second, 'utf8'));
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      try {
+        await removeRunOwnedPath(run, directory);
+        expect(await stat(directory).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
+        expect(await readFile(sentinel, 'utf8')).to.equal('preserve outside fixture child\n');
+      } finally {
+        await unlink(sentinel);
+        await removeRunOwnedRoot(run);
+      }
+      expect(await stat(run.root).catch((error: NodeJS.ErrnoException) => error.code)).to.equal('ENOENT');
     }
   });
 });

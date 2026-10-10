@@ -1,11 +1,17 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Org } from '@salesforce/core';
 import { TestContext } from '@salesforce/core/testSetup';
 import { expect } from 'chai';
 import MigrationCmsCommand, { cmsExecutionServices } from '../../../../src/commands/mcnext/migration/cms.js';
 import type { CmsExecutionPlan, CmsExecutionResult } from '../../../../src/migration/cmsExecution.js';
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+  type RunOwnedTemp,
+} from '../../../../src/filesystem/runOwnedTemp.js';
 
 const targetOrgId = '00D000000000001AAA';
 const readySource = '0Zu000000000001AAA';
@@ -49,16 +55,28 @@ function fakeResult(): CmsExecutionResult {
 
 describe('mcnext migration cms', () => {
   const $$ = new TestContext();
+  let run: RunOwnedTemp;
   let directory: string;
+  let sentinel: string;
 
   beforeEach(async () => {
-    directory = await mkdtemp(join(tmpdir(), 'mcnext-command-cms-'));
+    run = await createRunOwnedTemp('mcnext-command-cms');
+    directory = await createRunOwnedDirectory(run, 'fixture');
+    sentinel = join(run.root, 'sibling-sentinel.txt');
+    await writeFile(sentinel, 'keep', 'utf8');
     $$.SANDBOX.stub(Org, 'create').resolves({ getOrgId: () => targetOrgId } as Org);
   });
 
   afterEach(async () => {
     $$.restore();
-    await rm(directory, { recursive: true, force: true });
+    await removeRunOwnedPath(run, directory);
+    const childError = await stat(directory).catch((error: NodeJS.ErrnoException) => error);
+    expect(childError).to.have.property('code', 'ENOENT');
+    expect(await readFile(sentinel, 'utf8')).to.equal('keep');
+    await unlink(sentinel);
+    await removeRunOwnedRoot(run);
+    const rootError = await stat(run.root).catch((error: NodeJS.ErrnoException) => error);
+    expect(rootError).to.have.property('code', 'ENOENT');
   });
 
   it('passes only the ready, successful, explicitly bound route to execution', async () => {
@@ -74,7 +92,11 @@ describe('mcnext migration cms', () => {
           state: 'partial',
           workspaceMap: { sha256: 'd'.repeat(64) },
           packages: [
-            { sourceWorkspaceId: readySource, artifactPath: join(directory, 'ready'), packageManifestSha256: readyHash },
+            {
+              sourceWorkspaceId: readySource,
+              artifactPath: join(directory, 'ready'),
+              packageManifestSha256: readyHash,
+            },
             {
               sourceWorkspaceId: blockedSource,
               artifactPath: join(directory, 'blocked'),

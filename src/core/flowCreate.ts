@@ -1,8 +1,13 @@
-import { readFile, mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { parseStringPromise } from 'xml2js';
+import {
+  createRunOwnedTemp,
+  createRunOwnedDirectory,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+} from '../filesystem/runOwnedTemp.js';
 import { runCore, parseFlowResult, type CoreRunner, type FlowResult } from './flowCli.js';
 
 export type FlowCreateSelection = {
@@ -203,10 +208,12 @@ async function deployInactiveFlow(
     const baselineXml = await retrieveFlowXml(selection, owner.path, runner, 'baseline');
     await assertUpdateSourceContract(baselineXml, xml, update.expectUnchanged === true);
   }
-  const scratch = await mkdtemp(join(tmpdir(), 'mcnext-flow-create-'));
+  const run = await createRunOwnedTemp('mcnext-flow-create');
+  let scratch: string | undefined;
   let outcome: FlowResult | undefined;
   let failure: unknown;
   try {
+    scratch = await createRunOwnedDirectory(run, 'project');
     const folder = join(scratch, owner.path, 'main', 'default', 'flows');
     await mkdir(folder, { recursive: true });
     await writeFile(
@@ -257,12 +264,13 @@ async function deployInactiveFlow(
     failure = error;
   }
   try {
-    await rm(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    if (scratch) await removeRunOwnedPath(run, scratch);
+    await removeRunOwnedRoot(run);
   } catch (error) {
     throw new Error(
-      `Flow outcome: ${
-        failure ? String(failure) : JSON.stringify(outcome)
-      }; scratch cleanup failed at ${scratch}: ${String(error)}`
+      `Flow outcome: ${failure ? String(failure) : JSON.stringify(outcome)}; scratch cleanup failed at ${
+        scratch ?? run.root
+      }: ${String(error)}`
     );
   }
   if (failure) throw failure;
@@ -323,11 +331,7 @@ async function verifyFlowReadback(
     throw new Error('Independent Flow readback found missing or active definition; reconcile before retrying');
 }
 
-async function assertPostWriteState(
-  member: string,
-  update: FlowUpdateSelection,
-  query: FlowQuery
-): Promise<string> {
+async function assertPostWriteState(member: string, update: FlowUpdateSelection, query: FlowQuery): Promise<string> {
   const definitions = await query(
     `SELECT Id, LatestVersionId, ActiveVersionId FROM FlowDefinition WHERE DeveloperName = '${member}'`,
     true
@@ -364,8 +368,12 @@ async function retrieveFlowXml(
   runner: CoreRunner,
   stage: 'baseline' | 'readback'
 ): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), `mcnext-flow-${stage}-`));
+  const run = await createRunOwnedTemp(`mcnext-flow-${stage}`);
+  let root: string | undefined;
+  let xml: string | undefined;
+  let failure: unknown;
   try {
+    root = await createRunOwnedDirectory(run, 'project');
     await mkdir(join(root, packageDirectory), { recursive: true });
     await writeFile(
       join(root, 'sfdx-project.json'),
@@ -397,16 +405,28 @@ async function retrieveFlowXml(
     );
     if (retrieved.state !== 'succeeded') throw new Error(`Independent Flow ${stage} retrieval did not complete`);
     try {
-      return await readFile(
+      xml = await readFile(
         join(root, packageDirectory, 'main', 'default', 'flows', `${selection.member}.flow-meta.xml`),
         'utf8'
       );
     } catch {
       throw new Error(`Independent Flow ${stage} retrieval did not materialize the expected source file`);
     }
-  } finally {
-    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch (error) {
+    failure = error;
   }
+  try {
+    if (root) await removeRunOwnedPath(run, root);
+    await removeRunOwnedRoot(run);
+  } catch (error) {
+    throw new Error(
+      `Flow ${stage} outcome: ${failure ? String(failure) : 'source materialized'}; scratch cleanup failed at ${
+        root ?? run.root
+      }: ${String(error)}`
+    );
+  }
+  if (failure) throw failure;
+  return xml!;
 }
 
 async function assertUpdateSourceContract(
