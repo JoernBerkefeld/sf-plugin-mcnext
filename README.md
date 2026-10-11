@@ -34,7 +34,7 @@ sf plugins install sf-plugin-mcnext
 sf plugins update
 ```
 
-The `0.9.0` release exposes the 16 public commands documented below, including bounded `retrieve all`; the earlier `0.8.0` release does not contain this increment.
+The `0.9.1` release exposes the 16 public commands documented below, including bounded `retrieve all`; the earlier `0.8.0` release does not contain this increment. This patch corrects cross-platform verification fixtures and orders packed-artifact tests after manifest generation.
 
 MCNext declares the released [`sf-plugin-cms`](https://github.com/JoernBerkefeld/sf-plugin-cms) package as an installed oclif plugin dependency. A normal MCNext installation therefore installs and registers the compatible CMS provider automatically; users do not need a separate `sf plugins install sf-plugin-cms` step.
 

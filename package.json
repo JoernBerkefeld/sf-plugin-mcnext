@@ -140,7 +140,7 @@
     },
     "test:package-parser": {
       "command": "node --test scripts/parse-npm-pack-output.test.mjs scripts/verify-package-lifecycle.test.mjs scripts/run-unit-tests.test.mjs scripts/coverage-loader.test.mjs",
-      "dependencies": ["compile"],
+      "dependencies": ["manifest"],
       "files": [
         "scripts/parse-npm-pack-output.mjs",
         "scripts/parse-npm-pack-output.test.mjs",

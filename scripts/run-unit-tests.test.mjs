@@ -14,6 +14,65 @@ import {
 
 const packageRoot = resolve(import.meta.dirname, '..');
 
+for (const initialManifest of [undefined, 'stale']) {
+  test(`Wireit package regressions wait for a fresh manifest (${initialManifest ?? 'absent'})`, async () => {
+    const run = await createRunOwnedTemp('sf-mcnext-manifest-order-test');
+    const fixture = await createRunOwnedDirectory(run, 'fixture');
+    try {
+      const pkg = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
+      const graph = {};
+      for (const task of ['compile', 'manifest', 'test:only', 'test:package-parser']) {
+        graph[task] = {
+          command: `node task.mjs ${task}`,
+          dependencies: pkg.wireit[task].dependencies ?? [],
+        };
+      }
+      graph.test = { dependencies: ['test:only', 'test:package-parser'] };
+      await writeFile(join(fixture, 'package.json'), JSON.stringify({ scripts: { test: 'wireit' }, wireit: graph }));
+      await writeFile(
+        join(fixture, 'task.mjs'),
+        `
+import assert from 'node:assert/strict';
+import { readFile, writeFile } from 'node:fs/promises';
+import { setTimeout } from 'node:timers/promises';
+const task = process.argv[2];
+if (task === 'compile') {
+  await setTimeout(100);
+  await writeFile('compiled', 'fresh');
+} else if (task === 'manifest') {
+  assert.equal(await readFile('compiled', 'utf8'), 'fresh');
+  await setTimeout(250);
+  await writeFile('oclif.manifest.json', 'fresh');
+} else {
+  assert.equal(await readFile('oclif.manifest.json', 'utf8'), 'fresh');
+  await writeFile(task.replace(':', '-') + '.passed', 'fresh');
+}
+`
+      );
+      if (initialManifest) await writeFile(join(fixture, 'oclif.manifest.json'), initialManifest);
+      const result = spawnSync(process.execPath, [join(packageRoot, 'node_modules/wireit/bin/wireit.js')], {
+        cwd: fixture,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          npm_lifecycle_event: 'test',
+          npm_package_json: join(fixture, 'package.json'),
+          WIREIT_PARALLEL: '4',
+          WIREIT_CACHE: 'none',
+        },
+      });
+      assert.ifError(result.error);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      for (const consumer of ['test:only', 'test:package-parser']) {
+        assert.equal(await readFile(join(fixture, `${consumer.replace(':', '-')}.passed`), 'utf8'), 'fresh');
+      }
+    } finally {
+      await removeRunOwnedPath(run, fixture);
+      await removeRunOwnedRoot(run);
+    }
+  });
+}
+
 for (const mode of [
   'success',
   'failure',
@@ -64,7 +123,13 @@ process.once('beforeExit', async () => {
   if (!ownedRun) return;
   const paths = JSON.parse(readFileSync(process.env.RUNNER_RECORD, 'utf8'));
   if (!paths.link || !readFileSync(process.env.RUNNER_RECORD, 'utf8').includes('refused')) return;
-  await fsPromises.rmdir(paths.link);
+  assert.equal(paths.root, ownedRun.root);
+  assert.equal(paths.raw, join(ownedRun.root, 'raw'));
+  assert.equal(paths.link, join(paths.raw, 'link'));
+  assert.equal((await fsPromises.lstat(paths.link)).isSymbolicLink(), true);
+  // Remove only the fixture-created link entry, never its target.
+  if (process.platform === 'win32') await fsPromises.rmdir(paths.link);
+  else await fsPromises.unlink(paths.link);
   await cleanup.removeRunOwnedPath(ownedRun, paths.raw);
   await cleanup.removeRunOwnedRoot(ownedRun);
 });
@@ -321,7 +386,7 @@ test('Wireit normal test graph reaches runner and fresh compile without cached c
   assert.equal(Object.hasOwn(pkg.wireit['test:only'], 'output'), false);
   assert.ok(pkg.wireit['test:only'].files.includes('scripts/run-unit-tests.mjs'));
   const regressions = pkg.wireit['test:package-parser'];
-  assert.ok(regressions.dependencies.includes('compile'));
+  assert.deepEqual(regressions.dependencies, ['manifest']);
   for (const file of [
     'parse-npm-pack-output.test.mjs',
     'verify-package-lifecycle.test.mjs',
