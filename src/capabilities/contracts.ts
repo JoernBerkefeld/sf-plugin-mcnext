@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 export const METADATA_CAPABILITY_CONTRACT = 'sf-metadata-capability-v1' as const;
 export const METADATA_CAPABILITY_VERSION = '1.0.0' as const;
 export const METADATA_CAPABILITY_FIXTURE_SHA256 =
-  '557e9007ddaeea4c58807d9fc246fc62be646148591123d4398d5d00fa7f6f1b' as const;
+  '96360dde4c93dc04eb16a50e34b8b61c6950016dcd0451321ef781f9a565c6ff' as const;
 
 export type JsonScalar = boolean | number | string | null;
 export type JsonValue = JsonScalar | JsonValue[] | { [key: string]: JsonValue };

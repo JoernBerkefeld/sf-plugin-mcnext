@@ -32,7 +32,7 @@ const declarations = [
     },
     providerContract: {
       // Package compatibility is independent of the metadata contract major.
-      maxVersion: '0.8.999',
+      maxVersion: '0.9.999',
       minVersion: '0.8.0',
       name: 'sf-plugin-mcnext',
     },
@@ -59,7 +59,7 @@ const declarations = [
     },
     providerContract: {
       // Package compatibility is independent of the metadata contract major.
-      maxVersion: '0.8.999',
+      maxVersion: '0.9.999',
       minVersion: '0.8.0',
       name: 'sf-plugin-mcnext',
     },

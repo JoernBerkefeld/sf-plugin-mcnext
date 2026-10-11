@@ -277,7 +277,7 @@
         "strategy": "targeted"
       },
       "providerContract": {
-        "maxVersion": "0.8.999",
+        "maxVersion": "0.9.999",
         "minVersion": "0.8.0",
         "name": "sf-plugin-mcnext"
       },
@@ -303,7 +303,7 @@
         "strategy": "targeted"
       },
       "providerContract": {
-        "maxVersion": "0.8.999",
+        "maxVersion": "0.9.999",
         "minVersion": "0.8.0",
         "name": "sf-plugin-mcnext"
       },
