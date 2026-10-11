@@ -34,7 +34,7 @@ sf plugins install sf-plugin-mcnext
 sf plugins update
 ```
 
-The `0.9.1` release exposes the 16 public commands documented below, including bounded `retrieve all`; the earlier `0.8.0` release does not contain this increment. This patch corrects cross-platform verification fixtures and orders packed-artifact tests after manifest generation.
+The `0.9.2` release exposes the 16 public commands documented below, including bounded `retrieve all`; the earlier `0.8.0` release does not contain this increment. This patch corrects CMS producer registry identity validation; the `0.9.1` cross-platform verification fixes and packed-artifact manifest ordering are retained.
 
 MCNext declares the released [`sf-plugin-cms`](https://github.com/JoernBerkefeld/sf-plugin-cms) package as an installed oclif plugin dependency. A normal MCNext installation therefore installs and registers the compatible CMS provider automatically; users do not need a separate `sf plugins install sf-plugin-cms` step.
 
@@ -43,6 +43,8 @@ sf plugins install sf-plugin-mcnext
 sf cms --help
 sf cms info --contract-version 1 --json
 ```
+
+CMS registry `1.0.0` identifies the producer's frozen canonical fixture (`557e9007…`), independently of MCNext's local capability fixture (`96360dde…`). The local fixture includes newer MCNext-native provider ranges; those changes do not change the remote CMS contract identity. MCNext validates the exact CMS registry version and producer hash while retaining strict declaration, provider, bounds, and schema checks. MCNext `0.9.2` corrects the fixture identity conflation in published `0.9.1` that rejected CMS info v2. The earlier `0.9.0` and `0.9.1` release tags are preserved; this is a fresh compatibility patch.
 
 Package compatibility is separate from contract majors: published CMS `0.10.1` advertises provider profiles in the `0.10.0`–`0.10.999` range, while MCNext native Campaign/Data Space profiles accept `0.8.0`–`0.9.999`; the metadata registry remains `1.0.0` and CMS info v1 is unchanged. CMS route versions must match discovery and export provenance, not just a caller's version claim. CMS owns and validates the registry's advertised profiles rather than inferring support from the synthetic inventory. Published CMS `0.10.1` was installed directly from the npm registry into isolated Salesforce CLI state, with its tarball integrity verified against registry metadata. The default MCNext CMS adapter accepted the actual producer's info-v1 and info-v2 results, including registry `1.0.0`, without replacing the installed provider with a local tarball. This offline installed-provider proof does not qualify live-org retrieval, writes, or complete migration. CMS is released before its MCNext consumer, whose published installation is checked separately.
 

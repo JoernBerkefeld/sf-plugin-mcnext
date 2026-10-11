@@ -1,4 +1,6 @@
+import { readFile } from 'node:fs/promises';
 import { expect } from 'chai';
+import { METADATA_CAPABILITY_FIXTURE_SHA256 } from '../../src/capabilities/contracts.js';
 import {
   CMS_REGISTRY_FIXTURE_SHA256,
   CmsContractError,
@@ -28,6 +30,45 @@ function rejects(action: () => unknown, detail: string): void {
 }
 
 describe('CMS public contract boundary', () => {
+  it('accepts captured published CMS 0.10.1 registry identity independently of local native ranges', async () => {
+    // Offline capture from integrity-verified npm CMS 0.10.1, not a reconstructed constant-driven fixture.
+    const capture = JSON.parse(
+      await readFile(new URL('./fixtures/published-cms-0.10.1-info-v2.json', import.meta.url), 'utf8')
+    ) as typeof currentRegistryInfoFixture;
+    expect(capture.result.registry.fixtureSha256).to.equal(
+      '557e9007ddaeea4c58807d9fc246fc62be646148591123d4398d5d00fa7f6f1b'
+    );
+    expect(CMS_REGISTRY_FIXTURE_SHA256).not.to.equal(METADATA_CAPABILITY_FIXTURE_SHA256);
+    expect(validateCmsRegistryInfo(capture).envelope).to.deep.equal(capture);
+    expect(capture.result.registry.declarations).to.have.length(10);
+    for (const hash of ['', 'invalid', 'b'.repeat(64), METADATA_CAPABILITY_FIXTURE_SHA256]) {
+      const invalid = cloneFixture(capture) as unknown as {
+        result: { registry: { fixtureSha256: string } };
+      };
+      invalid.result.registry.fixtureSha256 = hash;
+      rejects(() => validateCmsRegistryInfo(invalid), 'registry fixture hash');
+    }
+    for (const registryVersion of ['invalid', '1.0.1', '2.0.0']) {
+      const invalid = cloneFixture(capture) as unknown as { result: { registry: { version: string } } };
+      invalid.result.registry.version = registryVersion;
+      rejects(() => validateCmsRegistryInfo(invalid), 'registry version');
+    }
+    const provider = cloneFixture(capture);
+    provider.result.registry.declarations[0].providerContract.minVersion = 'invalid';
+    rejects(() => validateCmsRegistryInfo(provider), 'registry minimum provider version');
+    const bounds = cloneFixture(capture);
+    bounds.result.registry.declarations[0].preflight.hardBounds.maxCalls = 0;
+    rejects(() => validateCmsRegistryInfo(bounds), 'registry preflight maxCalls');
+    const shape = cloneFixture(capture) as unknown as { result: { registry: Record<string, unknown> } };
+    shape.result.registry.extra = true;
+    rejects(() => validateCmsRegistryInfo(shape), 'registry fields');
+    const wrongProvider = cloneFixture(capture) as unknown as {
+      result: { registry: { declarations: Array<{ identity: { provider: string } }> } };
+    };
+    wrongProvider.result.registry.declarations[0].identity.provider = 'sf-plugin-mcnext';
+    rejects(() => validateCmsRegistryInfo(wrongProvider), 'registry provider');
+  });
+
   it('retains current lifecycle advertisements in v1 and v2 without creating routes', () => {
     expect(validateCmsInfo(currentInfoFixture).envelope.result).to.deep.equal(currentInfoFixture.result);
     expect(validateCmsRegistryInfo(currentRegistryInfoFixture).envelope.result).to.deep.equal(

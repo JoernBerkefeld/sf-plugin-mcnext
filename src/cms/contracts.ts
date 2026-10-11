@@ -10,8 +10,8 @@ export const CMS_REFERENCE_KIND = 'cms.content' as const;
 export const CMS_INFO_COMMAND = 'sf cms info' as const;
 export const CMS_REGISTRY_CONTRACT = 'sf-metadata-capability-v1' as const;
 export const CMS_REGISTRY_VERSION = '1.0.0' as const;
-export { METADATA_CAPABILITY_FIXTURE_SHA256 as CMS_REGISTRY_FIXTURE_SHA256 } from '../capabilities/contracts.js';
-import { METADATA_CAPABILITY_FIXTURE_SHA256 as CMS_REGISTRY_FIXTURE_SHA256 } from '../capabilities/contracts.js';
+// CMS registry 1.0.0 pins the producer's frozen fixture, not MCNext's local capability fixture.
+export const CMS_REGISTRY_FIXTURE_SHA256 = '557e9007ddaeea4c58807d9fc246fc62be646148591123d4398d5d00fa7f6f1b' as const;
 export const CMS_EXPORT_COMMAND = 'sf cms export workspace' as const;
 export const CMS_IMPORT_COMMAND = 'sf cms import workspace' as const;
 
