@@ -85,6 +85,68 @@ describe('identity-resolution configuration', () => {
     expect(requests).to.deep.equal([{ path: '/ssot/identity-resolutions' }]);
   });
 
+  it('returns a populated identityResolutions array unchanged', async () => {
+    const configurations = [RULESET];
+    const client = clientWith(() => ({ identityResolutions: configurations }));
+
+    expect(await listIdentityResolutions(client)).to.equal(configurations);
+  });
+
+  it('accepts an empty identityResolutions array', async () => {
+    const configurations: unknown[] = [];
+    const client = clientWith(() => ({ identityResolutions: configurations }));
+
+    expect(await listIdentityResolutions(client)).to.equal(configurations);
+  });
+
+  const malformedResponses: Array<{ label: string; response: unknown }> = [
+    { label: 'missing collection', response: {} },
+    { label: 'null collection', response: { identityResolutions: null } },
+    { label: 'undefined collection', response: { identityResolutions: undefined } },
+    { label: 'object collection', response: { identityResolutions: {} } },
+    { label: 'string collection', response: { identityResolutions: 'invalid' } },
+    { label: 'number collection', response: { identityResolutions: 1 } },
+    { label: 'boolean collection', response: { identityResolutions: false } },
+    { label: 'top-level array', response: [] },
+    { label: 'null response', response: null },
+    { label: 'undefined response', response: undefined },
+    { label: 'string response', response: 'invalid' },
+    { label: 'number response', response: 1 },
+    { label: 'boolean response', response: false },
+  ];
+
+  for (const { label, response } of malformedResponses) {
+    it(`rejects ${label} with a deliberate collection-envelope error`, async () => {
+      const client = clientWith(() => response);
+      let caught: unknown;
+      try {
+        await listIdentityResolutions(client);
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).to.be.instanceOf(Error);
+      expect((caught as Error).message).to.equal(
+        'Identity configuration response requires an identityResolutions array'
+      );
+    });
+  }
+
+  it('preserves list transport rejections unchanged', async () => {
+    const failure = new Error('Transport failed');
+    const client = clientWith(() => {
+      throw failure;
+    });
+    let caught: unknown;
+    try {
+      await listIdentityResolutions(client);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).to.equal(failure);
+  });
+
   it('parses the bare detail object by Salesforce ruleset ID', async () => {
     const client = clientWith((request) => {
       expect(request).to.deep.equal({ path: '/ssot/identity-resolutions/1iraj000000VkBeAAK' });

@@ -29,10 +29,19 @@ export type IdentityResolutionConfiguration = Record<string, unknown> & {
 
 /** Fetch all ruleset configurations from the non-paginated v67 collection envelope. */
 export async function listIdentityResolutions(client: McnClient): Promise<IdentityResolutionConfiguration[]> {
-  const response = await client.request<{ identityResolutions?: IdentityResolutionConfiguration[] }>({
+  const response = await client.request<unknown>({
     path: IDENTITY_RESOLUTIONS_PATH,
   });
-  return Array.isArray(response.identityResolutions) ? response.identityResolutions : [];
+  if (
+    typeof response !== 'object' ||
+    response === null ||
+    Array.isArray(response) ||
+    !('identityResolutions' in response) ||
+    !Array.isArray(response.identityResolutions)
+  ) {
+    throw new Error('Identity configuration response requires an identityResolutions array');
+  }
+  return response.identityResolutions as IdentityResolutionConfiguration[];
 }
 
 /** Fetch one bare ruleset configuration by Salesforce ruleset ID. */

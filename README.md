@@ -217,7 +217,7 @@ sf mcnext segment records export --target-org my-mcnext-org --output-file segmen
 
 ## `sf mcnext identity-resolution list`
 
-Lists ruleset configurations and aggregate status from one non-paginated collection request. It does not export unified-profile rows.
+Lists ruleset configurations and aggregate status from one non-paginated collection request. It does not export unified-profile rows. The response must be an object containing an `identityResolutions` array; an empty array is valid, but a missing or malformed collection is rejected rather than treated as empty. The same validation applies to target collection reads during `identity-resolution plan` conflict checks.
 
 ```bash
 sf mcnext identity-resolution list --target-org my-mcnext-org --api-version 67.0
