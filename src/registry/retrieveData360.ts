@@ -93,11 +93,11 @@ function validateCollection(response: unknown): IdentityConfigurationCollection 
   }
   const identities = new Set<string>();
   for (const row of response.identityResolutions as unknown[]) {
-    if (!object(row) || typeof row.rulesetId !== 'string' || !/^[A-Za-z0-9]{18}$/u.test(row.rulesetId)) {
-      throw new Error('Identity configuration row requires an actual Salesforce rulesetId');
+    if (!object(row) || typeof row.id !== 'string' || !/^[A-Za-z0-9]{18}$/u.test(row.id)) {
+      throw new Error('Identity configuration row requires an actual Salesforce id');
     }
-    const key = row.rulesetId.toLowerCase();
-    if (identities.has(key)) throw new Error('Identity configuration contains conflicting ruleset identities');
+    const key = row.id.toLowerCase();
+    if (identities.has(key)) throw new Error('Identity configuration contains conflicting Salesforce ids');
     identities.add(key);
   }
   return response as IdentityConfigurationCollection;

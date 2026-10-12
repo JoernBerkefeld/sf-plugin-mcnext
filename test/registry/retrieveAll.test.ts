@@ -550,7 +550,12 @@ describe('real retrieve-all execution', () => {
       ({
         apiVersion: '67.0',
         request: async () => ({
-          identityResolutions: [{ rulesetId: '0Ii000000000001AAA', token: 'private-token' }],
+          identityResolutions: [
+            { id: '1iraj000000UiAIAA0', token: 'private-token' },
+            { id: '1iraj000000UiF8AAK', rulesetId: 'mce', token: 'private-token' },
+            { id: '1iraj000000UiKGAA0', rulesetId: 'MC', token: 'private-token' },
+            { id: '1iraj000000VkBeAAK', rulesetId: 'MKT', token: 'private-token' },
+          ],
           session: { accessToken: 'private-token', bytes: Buffer.from('private-bytes') },
         }),
       } as unknown as McnClient);
@@ -573,7 +578,16 @@ describe('real retrieve-all execution', () => {
     expect(JSON.stringify(projected)).not.to.include('private-bytes');
     expect(
       projected.providers.find((row) => row.family === 'identity-configuration')?.evidence?.rulesetIds
-    ).to.deep.equal(['0Ii000000000001AAA']);
+    ).to.deep.equal(['1iraj000000UiAIAA0', '1iraj000000UiF8AAK', '1iraj000000UiKGAA0', '1iraj000000VkBeAAK']);
+    const identity = internal.providers.find((row) => row.family === 'identity-configuration')!;
+    expect(identity.state).to.equal('success');
+    expect(await readFile(identity.files[0], 'utf8')).to.equal(
+      `${JSON.stringify((identity.result as { result: unknown }).result, undefined, 2)}\n`
+    );
+    const evidence = projected.providers.find((row) => row.family === 'identity-configuration')!.evidence!;
+    expect(Object.keys(evidence)).to.deep.equal(['rulesetIds']);
+    for (const suffix of ['mce', 'MC', 'MKT']) expect(evidence.rulesetIds).not.to.include(suffix);
+    expect(projected.complete).to.equal(false);
     expect(projected.providers.find((row) => row.family === `campaign-flows:${campaignId}`)).to.include({
       state: 'pending',
       jobId: 'job',

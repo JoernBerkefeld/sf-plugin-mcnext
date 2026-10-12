@@ -173,7 +173,7 @@ function publicEvidence(result: NonNullable<RetrieveAllProvider['result']>): Ret
       },
     };
   return {
-    rulesetIds: (result.result?.identityResolutions ?? []).flatMap((row) => (row.rulesetId ? [row.rulesetId] : [])),
+    rulesetIds: (result.result?.identityResolutions ?? []).flatMap((row) => (row.id ? [row.id] : [])),
   };
 }
 
@@ -321,7 +321,7 @@ export async function retrieveAll(
     outcome,
     'data360',
     'native-identity-configuration',
-    'Downloaded rulesetId configuration collection does not qualify native Data360 prerequisites, all data spaces or restore fidelity.'
+    'Downloaded Salesforce id configuration collection does not qualify native Data360 prerequisites, all data spaces or restore fidelity.'
   );
   blocked(
     outcome,

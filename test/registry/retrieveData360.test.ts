@@ -14,8 +14,8 @@ import {
 const collection = {
   identityResolutions: [
     {
-      id: 'opaque-provider-id',
-      rulesetId: '1iraj000000VkBeAAK',
+      id: '1iraj000000VkBeAAK',
+      rulesetId: 'MKT',
       configurationType: 'Individual',
       dataSpaceName: 'default',
       objectApiName: 'ssot__Individual__dlm',
@@ -107,17 +107,48 @@ describe('aggregate identity configuration retrieval', () => {
     expect(JSON.parse(await readFile(destination, 'utf8'))).to.deep.equal(response);
   });
 
+  for (const [name, rows] of [
+    ['official id-only schema', [{ id: '1ir1Q0000004CKHQA2', matchRules: [], unknownField: { retained: true } }]],
+    [
+      'retained live row shapes',
+      [
+        { id: '1iraj000000UiAIAA0', unknownField: null },
+        { id: '1iraj000000UiF8AAK', rulesetId: 'mce', unknownField: ['retained'] },
+        { id: '1iraj000000UiKGAA0', rulesetId: 'MC', unknownField: { retained: true } },
+        { id: '1iraj000000VkBeAAK', rulesetId: 'MKT', unknownField: false },
+      ],
+    ],
+    ['valid id without a prefix restriction', [{ id: '0Ii000000000001AAA', rulesetId: 'suffix' }]],
+  ] as Array<[string, unknown[]]>) {
+    it(`preserves ${name} without fallback, synthesis or mutation`, async () => {
+      response = { identityResolutions: rows, unknownEnvelope: { retained: true } };
+      const before = JSON.stringify(response, undefined, 2);
+      const result = await retrieveIdentityConfiguration(input, services);
+      expect(result.state).to.equal('success');
+      expect(result.result).to.equal(response);
+      expect(JSON.stringify(response, undefined, 2)).to.equal(before);
+      expect(await readFile(destination, 'utf8')).to.equal(`${before}\n`);
+      expect(request.callCount).to.equal(1);
+    });
+  }
+
   for (const [name, value] of [
     ['missing array', {}],
     ['null response', null],
     ['array response', []],
     ['non-array collection', { identityResolutions: {} }],
     ['non-object row', { identityResolutions: [null] }],
-    ['missing identity', { identityResolutions: [{ id: 'opaque' }] }],
-    ['malformed identity', { identityResolutions: [{ rulesetId: '../escape' }] }],
+    ['missing id', { identityResolutions: [{}] }],
+    ['non-string id', { identityResolutions: [{ id: 123 }] }],
+    ['null id', { identityResolutions: [{ id: null }] }],
+    ['malformed id', { identityResolutions: [{ id: '../escape' }] }],
+    ['short id', { identityResolutions: [{ id: '1iraj000000VkBeA' }] }],
+    ['long id', { identityResolutions: [{ id: '1iraj000000VkBeAAK0' }] }],
+    ['non-alphanumeric id', { identityResolutions: [{ id: '1iraj000000VkBeAA!' }] }],
+    ['valid rulesetId without id', { identityResolutions: [{ rulesetId: '1iraj000000VkBeAAK' }] }],
     [
-      'mirrored id-only collection (no invented rulesetId)',
-      { identityResolutions: [{ id: '1ir1Q0000004CKHQA2', matchRules: [] }] },
+      'valid rulesetId with invalid id',
+      { identityResolutions: [{ id: 'opaque-provider-id', rulesetId: '1iraj000000VkBeAAK' }] },
     ],
     [
       'duplicate identity',
@@ -125,7 +156,7 @@ describe('aggregate identity configuration retrieval', () => {
     ],
     [
       'case-conflicting identity',
-      { identityResolutions: [collection.identityResolutions[0], { rulesetId: '1IRAJ000000VKBEAAK' }] },
+      { identityResolutions: [collection.identityResolutions[0], { id: '1IRAJ000000VKBEAAK', rulesetId: 'other' }] },
     ],
   ] as Array<[string, unknown]>) {
     it(`blocks ${name} before any project writes`, async () => {
@@ -134,6 +165,11 @@ describe('aggregate identity configuration retrieval', () => {
       expect(result.state).to.equal('blocked');
       expect(result.files).to.deep.equal([]);
       expect(result.result).to.equal(undefined);
+      expect(request.callCount).to.equal(1);
+      if (name.includes('id') || name.includes('identity')) {
+        expect(result.diagnostics.join(' ')).to.include('Salesforce id');
+        expect(result.diagnostics.join(' ')).not.to.include('Salesforce rulesetId');
+      }
       expect(await readdir(input.projectRoot)).to.deep.equal(['native', 'sfdx-project.json']);
     });
   }
