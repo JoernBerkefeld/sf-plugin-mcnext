@@ -131,7 +131,7 @@ try {
   const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
   assert.equal(packageJson.exports, './lib/index.js', 'package export must point to the compiled entry point');
   const cmsDependencyRange = packageJson.dependencies?.['sf-plugin-cms'];
-  assert.equal(cmsDependencyRange, '^0.10.1', 'CMS provider must target the qualified published info-v2 release');
+  assert.equal(cmsDependencyRange, '^0.11.0', 'CMS provider must target the qualified published info-v2 release');
   assert.deepEqual(
     packageJson.oclif?.plugins,
     ['sf-plugin-cms'],

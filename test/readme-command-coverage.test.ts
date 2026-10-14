@@ -315,7 +315,7 @@ describe('README public command coverage', () => {
       'does not mean an org write was rolled back',
     ])
       expect(section).to.include(boundary);
-    expect(readme).to.include('17 commands, including the unreleased bounded `flow association` command');
+    expect(readme).to.include('17 commands, including bounded `flow association`');
     expect(readme).to.include(
       'provenance sidecar at `mcnext/campaign-flow-associations/<CampaignId>.mcn-flow-associations.json`'
     );

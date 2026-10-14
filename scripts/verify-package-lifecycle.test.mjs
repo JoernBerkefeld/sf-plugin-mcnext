@@ -17,12 +17,12 @@ const packageRoot = resolve(import.meta.dirname, '..');
 test('CMS dependency and registry lock align with the qualified published info-v2 release', async () => {
   const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
   const lock = JSON.parse(await readFile(join(packageRoot, 'package-lock.json'), 'utf8'));
-  assert.equal(manifest.dependencies['sf-plugin-cms'], '^0.10.1');
-  assert.equal(lock.packages[''].dependencies['sf-plugin-cms'], '^0.10.1');
-  assert.equal(lock.packages['node_modules/sf-plugin-cms'].version, '0.10.1');
+  assert.equal(manifest.dependencies['sf-plugin-cms'], '^0.11.0');
+  assert.equal(lock.packages[''].dependencies['sf-plugin-cms'], '^0.11.0');
+  assert.equal(lock.packages['node_modules/sf-plugin-cms'].version, '0.11.0');
   assert.equal(
     lock.packages['node_modules/sf-plugin-cms'].resolved,
-    'https://registry.npmjs.org/sf-plugin-cms/-/sf-plugin-cms-0.10.1.tgz'
+    'https://registry.npmjs.org/sf-plugin-cms/-/sf-plugin-cms-0.11.0.tgz'
   );
   assert.match(lock.packages['node_modules/sf-plugin-cms'].integrity, /^sha512-/u);
   assert.notEqual(lock.packages['node_modules/sf-plugin-cms'].link, true);

@@ -19,6 +19,8 @@ import {
   type ServerIdentity,
 } from '../../src/capabilities/contracts.js';
 
+import { lookupMcnCapability } from '../../src/capabilities/registry.js';
+
 const fixturePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'metadata-capability-v1.json');
 
 async function loadFixture(): Promise<{ bytes: Buffer; value: CapabilityRegistryFixture }> {
@@ -40,6 +42,26 @@ function sampleIdentity(): PortableIdentity {
 }
 
 describe('sf-metadata-capability-v1 foundation', () => {
+  it('extends both native runtime ceilings without changing the frozen fixture or floors', async () => {
+    const { value } = await loadFixture();
+    const native = value.declarations.filter((entry) => entry.identity.provider === 'sf-plugin-mcnext');
+    expect(native).to.have.length(2);
+    for (const historical of native) {
+      expect(historical.providerContract).to.deep.equal({
+        name: 'sf-plugin-mcnext',
+        minVersion: '0.8.0',
+        maxVersion: '0.9.999',
+      });
+      const runtime = lookupMcnCapability(historical.identity);
+      expect(runtime.available).to.equal(true);
+      if (!runtime.available) throw new Error('Missing native capability');
+      expect(runtime.declaration).to.deep.equal({
+        ...historical,
+        providerContract: { ...historical.providerContract, maxVersion: '0.10.999' },
+      });
+    }
+  });
+
   it('validates the canonical evidence-qualified profile fixture', async () => {
     const { value } = await loadFixture();
     expect(() => assertCapabilityRegistryFixture(value)).not.to.throw();
@@ -159,10 +181,15 @@ describe('sf-metadata-capability-v1 foundation', () => {
   });
 
   it('derives native declarations from the canonical fixture', async () => {
-    const { lookupMcnCapability } = await import('../../src/capabilities/registry.js');
     const { value } = await loadFixture();
     for (const declaration of value.declarations.filter((entry) => entry.identity.provider === 'sf-plugin-mcnext')) {
-      expect(lookupMcnCapability(declaration.identity)).to.deep.equal({ available: true, declaration });
+      expect(lookupMcnCapability(declaration.identity)).to.deep.equal({
+        available: true,
+        declaration: {
+          ...declaration,
+          providerContract: { ...declaration.providerContract, maxVersion: '0.10.999' },
+        },
+      });
     }
   });
 

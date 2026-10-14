@@ -337,10 +337,10 @@ describe('strict deploy preflight planning', () => {
       operation('root', { family: 'mcnext', type: 'Campaign', apiName: 'Root', context: targetContext }),
     ]);
     expect(planDeployPreflight([native]).routes[0].status).to.equal('ready');
-    for (const providerVersion of ['0.8.0', '0.9.0', '0.9.999']) {
+    for (const providerVersion of ['0.8.0', '0.9.0', '0.9.999', '0.10.0', '0.10.999']) {
       expect(planDeployPreflight([{ ...native, providerVersion }]).routes[0].status).to.equal('ready');
     }
-    for (const providerVersion of ['0.7.999', '0.10.0', '1.0.0']) {
+    for (const providerVersion of ['0.7.999', '0.11.0', '1.0.0']) {
       expect(planDeployPreflight([{ ...native, providerVersion }]).routes[0].status).to.equal('blocked');
     }
     const cms = cmsRoute();
