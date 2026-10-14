@@ -34,7 +34,7 @@ sf plugins install sf-plugin-mcnext
 sf plugins update
 ```
 
-The `0.9.2` release exposes the 16 public commands documented below, including bounded `retrieve all`; the earlier `0.8.0` release does not contain this increment. This patch corrects CMS producer registry identity validation; the `0.9.1` cross-platform verification fixes and packed-artifact manifest ordering are retained.
+The `0.9.2` release exposes 16 public commands, including bounded `retrieve all`; the earlier `0.8.0` release does not contain this increment. The current working tree documents 17 commands, including the unreleased bounded `flow association` command; install from a release that includes that command before using it. This patch corrects CMS producer registry identity validation; the `0.9.1` cross-platform verification fixes and packed-artifact manifest ordering are retained.
 
 MCNext declares the released [`sf-plugin-cms`](https://github.com/JoernBerkefeld/sf-plugin-cms) package as an installed oclif plugin dependency. A normal MCNext installation therefore installs and registers the compatible CMS provider automatically; users do not need a separate `sf plugins install sf-plugin-cms` step.
 
@@ -94,6 +94,7 @@ Every command inherits the following oclif options. Command-specific tables link
 - [`sf mcnext data-graph metadata`](#sf-mcnext-data-graph-metadata)
 - [`sf mcnext identity-resolution plan`](#sf-mcnext-identity-resolution-plan)
 - [`sf mcnext flow source`](#sf-mcnext-flow-source)
+- [`sf mcnext flow association`](#sf-mcnext-flow-association)
 - [`sf mcnext migration plan`](#sf-mcnext-migration-plan)
 - [`sf mcnext segment definition create`](#sf-mcnext-segment-definition-create)
 - [`sf mcnext campaign config`](#sf-mcnext-campaign-config)
@@ -370,6 +371,49 @@ sf mcnext flow source --operation update --member MyFlow --target-org my-mcnext-
 | `--expect-unchanged`                                  | Update only   | Boolean; default `false`. Permits an exact unchanged repeat and requires core/readback to confirm it; otherwise update requires a label/interview-label change. |
 | `--wait <minutes>`                                    | No            | Integer `1`–`30`; default `10`.                                                                                                                                 |
 | [Common inherited options](#common-inherited-options) | No            | `--json`, `--flags-dir`.                                                                                                                                        |
+
+### Campaign attachment is separate from Flow XML
+
+Campaign discovery follows the described `Campaign.Flows` child relationship through `FlowRecord.AssociatedRecordId`. It selects the exact Campaign ID, not a Flow label or an API-name prefix. Discovery rejects incomplete results and more than 100 associated Flows; its bounded `LIMIT 101` query is not an org-wide Flow inventory. A similarly named Flow with a null or different association is not included. To investigate a missing Flow, reconcile a completed accessible `FlowRecord` inventory with a count query and inspect the exact record/member and association; matching labels alone do not establish which Flow a user intended.
+
+At API `67.0`, the documented Data API attachment field is `FlowRecord.AssociatedRecordId`. Fresh describe must confirm that the object and field are updateable and that the field can reference `Campaign`, but schema writability alone is insufficient: a target no-trigger autolaunched draft rejected the attachment with `FIELD_NOT_UPDATABLE` because its Flow type cannot be associated with a Campaign. The successful Segment-triggered source experiment must not be generalized to arbitrary Flow types or to the target org. `FlowRecord` itself is not directly createable. Native Metadata API Flow creation supplies the Flow; a separate, explicitly qualified Data API update supplies its Campaign attachment. Do not add invented Campaign fields to Flow XML or treat a Campaign's flat scalar snapshot as the attachment record.
+
+A bounded live same-org experiment created two inactive copies of a Segment-triggered Flow and a new inactive Campaign. Both copies initially had a null Campaign attachment. Updating each copy's `AssociatedRecordId` was independently read back with the same Campaign ID, unchanged `SegmentId`, and no active version. Fresh Campaign discovery correlated both exact API members with their Tooling definitions/latest versions, and native retrieval returned both XML files. This proves a separate attachment write for those test artifacts, not an automatic plugin restore capability or activation readiness.
+
+The native XML carries the Segment selection in `start.segment`; the described core `FlowRecord.SegmentId` is read-only. Campaign attachment and Segment selection therefore need separate provenance and verification. Cross-org work must resolve real destination Campaign/Flow identities and a verified destination Segment and its prerequisites; source IDs must not be reused or guessed. The existing Flow mutation command deliberately requires same-org reference provenance. Draft or `InvalidDraft` retrieval/deployment does not demonstrate a runnable or published marketing automation.
+
+`retrieveCampaignFlows` continues to report `associationPersistence: 'blocked'`: downloaded XML alone does not carry Campaign attachment, and retrieval does not restore it. After all selected native XML files are written and closed, bounded retrieval publishes a new provenance sidecar at `mcnext/campaign-flow-associations/<CampaignId>.mcn-flow-associations.json`, without overwrite. It records exact source identities, relative native paths and SHA-256 hashes of the original XML bytes; it does not supply destination mappings. Failed sidecar publication retains successful native files without claiming a confirmed artifact. The separate `flow association` command below consumes caller-selected correspondence and freshly qualifies the destination; artifact provenance alone does not authorize attachment. Native Segment completeness, automatic cross-org Segment mapping, referenced CMS dependencies, and full Campaign restore remain unqualified.
+
+## `sf mcnext flow association`
+
+Plans or explicitly attaches one existing inactive Segment-triggered Flow to an inactive Campaign. This is a bounded attachment operation, not Flow creation, deployment, Segment transport, activation, publication, sending, or a complete restore. `InvalidDraft` is not runnable or activation-ready; runtime readiness and business equivalence are never assessed.
+
+Prepare `association-input.json` inside the existing project directory with exactly three root keys: `artifact`, `source`, and `target`. `artifact` is the retrieved schema-version-1 `campaign-flow-associations` sidecar, not a fabricated mapping. `source` must contain `orgId`, `campaignId`, `flowRecordId`, `member`, and `segmentId`, matching exactly one selected artifact Flow. `target` must contain caller-verified `campaignId`, `flowRecordId`, `member`, `segmentId`, `segmentApiName`, `segmentDefinitionId`, `expectedDefinitionId`, and `expectedLatestVersionId`. All IDs are exact 18-character identities. The Connect Segment definition ID (`3HX`) is distinct from the Flow definition (`300`) and latest version (`301`). The command never infers business mappings from labels or reuses source IDs as destination defaults. Source provenance is not proof of destination eligibility or business equivalence.
+
+```bash
+sf mcnext flow association --operation plan --target-org target-mcn --expected-org-id 00D000000000002AAA --api-version 67.0 --project-dir ./project --input-file association-input.json --json
+sf mcnext flow association --operation apply --target-org target-mcn --expected-org-id 00D000000000002AAA --api-version 67.0 --project-dir ./project --input-file association-input.json --output-file association-result.json --json
+```
+
+`plan` performs fresh destination reads without an org write; it is not an executable saved plan or authorization to apply later. `apply` repeats qualification and delegates at most one `AssociatedRecordId`-only PATCH, with independent readback and no retry. `SegmentId` is never written. An already intended attachment is independently verified as `noop`; a different non-null attachment is a conflict, never overwritten or detached. Reserve the destination against concurrent writers: immediate rechecks are not atomic compare-and-swap.
+
+Fresh checks cover the selected org, inactive Campaign, existing inactive `Draft`/`InvalidDraft` Segment-triggered Flow, exact latest version, and the narrowly supported DBT `ACTIVE`, unpublished `NO_REFRESH` Segment in the active default data space on `UnifiedssotIndividualMkt__dlm`. This is not a universal Salesforce eligibility matrix. No native XML rewrite, activation, detach, deploy, or CREATE fallback is available.
+
+### Options
+
+| Option                             | Required | Expected/allowed values                                                                                                                                              |
+| ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--operation <operation>`          | Yes      | `plan` or `apply`; read-only planning or explicit field-only attachment. No default.                                                                                 |
+| `--target-org <alias-or-username>` | Yes      | Explicit authenticated destination org alias or username; no configured default.                                                                                     |
+| `--expected-org-id <id>`           | Yes      | Verified exact 18-character destination org ID.                                                                                                                      |
+| `--api-version <version>`          | Yes      | Only `67.0`; explicitly required, no default.                                                                                                                        |
+| `--project-dir <directory>`        | Yes      | Existing project directory confining input and output files.                                                                                                         |
+| `--input-file <path>`              | Yes      | JSON with exactly `artifact`, `source`, and `target`; explicit caller-selected correspondence. File inside project-dir; no traversal or linked/reparse ancestors.    |
+| `--output-file <path>`             | No       | New redacted result JSON inside project-dir; reserved before service execution, no overwrite. Parent directory must exist; no traversal or linked/reparse ancestors. |
+
+See [Common inherited options](#common-inherited-options) for `--json` and `--flags-dir`. There are no short aliases for these command-specific flags.
+
+JSON and optional result-file output contain the same redacted association result. Success states are `planned`, `attached`, and `noop`, with exact destination identities, `writeAttempted`, and `writeOutcome`. Failed operations return `state: 'failed'` with a code and exit nonzero. `RECONCILIATION_REQUIRED` means a write was attempted: inspect the destination before any manual retry. `OUTPUT_WRITE_FAILED` is a local publication failure and may retain an independently verified `associationResult`; it does not mean an org write was rolled back. Existing output files and invalid local paths fail preflight before any org write attempt.
 
 ## `sf mcnext migration plan`
 

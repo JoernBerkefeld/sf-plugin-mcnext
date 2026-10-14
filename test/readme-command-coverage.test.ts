@@ -55,6 +55,24 @@ const constraintExpectations: Record<string, Record<string, ConstraintExpectatio
     'record-id': { required: 'Export/update', expected: ['Forbidden for create'] },
     'target-name': { required: 'Create', expected: ['distinct from source name', 'Forbidden for export/update'] },
   },
+  'mcnext:flow:association': {
+    'api-version': { required: 'Yes', expected: ['Only `67.0`', 'explicitly required, no default'] },
+    'expected-org-id': { required: 'Yes', expected: ['Verified exact 18-character destination org ID'] },
+    'input-file': {
+      required: 'Yes',
+      expected: [
+        'exactly `artifact`, `source`, and `target`',
+        'explicit caller-selected correspondence',
+        'inside project-dir',
+      ],
+    },
+    'output-file': {
+      required: 'No',
+      expected: ['reserved before service execution', 'no overwrite', 'Parent directory must exist'],
+    },
+    'project-dir': { required: 'Yes', expected: ['Existing project directory'] },
+    'target-org': { required: 'Yes', expected: ['Explicit authenticated destination', 'no configured default'] },
+  },
   'mcnext:flow:source': {
     'expect-unchanged': { required: 'Update only', expected: ['default `false`', 'exact unchanged repeat'] },
     'expected-definition-id': { required: 'Update', expected: ['Update-only'] },
@@ -198,7 +216,7 @@ describe('README public command coverage', () => {
     const manifest = JSON.parse(manifestText) as Manifest;
     const commands = Object.values(manifest.commands);
 
-    expect(commands).to.have.length(16);
+    expect(commands).to.have.length(17);
     expect(readme).to.include('## Common inherited options');
     expect(readme).to.include('--json');
     expect(readme).to.include('--flags-dir <directory>');
@@ -256,6 +274,52 @@ describe('README public command coverage', () => {
         }
       }
     }
+  });
+
+  it('documents explicit association correspondence and the narrow inactive attachment boundary', async () => {
+    const readme = await readProjectFile('README.md');
+    const section = commandSection(readme, 'mcnext:flow:association');
+    const examples = bashBlocks(section).join('\n');
+
+    for (const operation of ['plan', 'apply']) expect(examples).to.include(`--operation ${operation}`);
+    for (const field of [
+      'orgId',
+      'campaignId',
+      'flowRecordId',
+      'member',
+      'segmentId',
+      'segmentApiName',
+      'segmentDefinitionId',
+      'expectedDefinitionId',
+      'expectedLatestVersionId',
+    ])
+      expect(section).to.include(`\`${field}\``);
+    for (const boundary of [
+      'exactly three root keys: `artifact`, `source`, and `target`',
+      'matching exactly one selected artifact Flow',
+      'never infers business mappings from labels',
+      'Source provenance is not proof of destination eligibility or business equivalence',
+      'without an org write',
+      'at most one `AssociatedRecordId`-only PATCH',
+      '`SegmentId` is never written',
+      'a different non-null attachment is a conflict',
+      'not atomic compare-and-swap',
+      'DBT `ACTIVE`, unpublished `NO_REFRESH` Segment',
+      'active default data space on `UnifiedssotIndividualMkt__dlm`',
+      'not a universal Salesforce eligibility matrix',
+      '`InvalidDraft` is not runnable or activation-ready',
+      'runtime readiness and business equivalence are never assessed',
+      'No native XML rewrite, activation, detach, deploy, or CREATE fallback',
+      '`RECONCILIATION_REQUIRED`',
+      '`OUTPUT_WRITE_FAILED`',
+      'does not mean an org write was rolled back',
+    ])
+      expect(section).to.include(boundary);
+    expect(readme).to.include('17 commands, including the unreleased bounded `flow association` command');
+    expect(readme).to.include(
+      'provenance sidecar at `mcnext/campaign-flow-associations/<CampaignId>.mcn-flow-associations.json`'
+    );
+    expect(readme).not.to.include('does not yet export a restorable association sidecar or apply attachment mappings');
   });
 
   it('documents the installed CMS oclif dependency and public contract boundary', async () => {

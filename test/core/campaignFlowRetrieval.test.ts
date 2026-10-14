@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto';
 import { existsSync, watch, writeFileSync } from 'node:fs';
 import filesystem, { lstat, mkdir, readFile, symlink, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { expect } from 'chai';
 import sinon from 'sinon';
 import { retrieveCampaignFlows } from '../../src/core/campaignFlowRetrieval.js';
@@ -171,6 +172,24 @@ describe('Campaign associated native Flow provider', () => {
       join(project, 'other/main/default/flows/Example_2.flow-meta.xml'),
     ]);
     await Promise.all(actual.files.map(async (file) => expect(await readFile(file.filePath, 'utf8')).to.equal(xml)));
+    const artifactFile = join(project, 'mcnext/campaign-flow-associations', `${campaignId}.mcn-flow-associations.json`);
+    expect(actual.associationArtifactFile).to.equal(artifactFile);
+    expect(actual.associationArtifact).to.deep.equal({
+      schemaVersion: 1,
+      kind: 'campaign-flow-associations',
+      source: { orgId: org, apiVersion: '67.0', campaignId },
+      flows: actual.files.map((file, index) => ({
+        member: file.member,
+        flowRecordId: id('2aF', index + 1),
+        associatedRecordId: campaignId,
+        segmentId: segment,
+        definitionId: id('300', index + 1),
+        latestVersionId: id('301', index + 1),
+        nativeFile: relative(project, file.filePath),
+        nativeSha256: createHash('sha256').update(Buffer.from(xml)).digest('hex'),
+      })),
+    });
+    expect(JSON.parse(await readFile(artifactFile, 'utf8'))).to.deep.equal(actual.associationArtifact);
     const native = calls.find((call) => call.args[0] === 'project')!;
     expect(existsSync(native.cwd)).to.equal(false);
     expect(native.args).to.deep.equal([
@@ -275,6 +294,9 @@ describe('Campaign associated native Flow provider', () => {
       { records: [record(1), { ...record(2), ApiName: 'Example_1' }] },
       { records: [{ ...record(1), AssociatedRecordId: '701000000000002AAA' }] },
       { records: [{ ...record(1), SegmentId: undefined }] },
+      { records: [{ ...record(1), SegmentId: null }] },
+      { records: [{ ...record(1), SegmentId: '1sg000000000002AAA' }] },
+      { version: { ...version(1), Metadata: { start: { triggerType: 'Segment' } } } },
       { definition: { ...definition(1), LatestVersionId: '10v000000000001AAA' } },
       { version: { ...version(1), DefinitionId: id('300', 2) } },
       { version: { ...version(1), Metadata: null } },
@@ -301,6 +323,8 @@ describe('Campaign associated native Flow provider', () => {
       });
       expect(actual.state).to.equal(status === 'Pending' ? 'pending' : 'failed');
       expect(actual.jobId).to.equal('job-evidence');
+      expect(actual.associationArtifactFile).not.to.exist;
+      expect(actual.associationArtifact).not.to.exist;
       expect(actual.files).to.deep.equal([]);
       expect(existsSync(actual.stagingProject!)).to.equal(true);
     }
@@ -343,6 +367,62 @@ describe('Campaign associated native Flow provider', () => {
       expect(actual.files).to.deep.equal([]);
       expect(existsSync(join(project, 'packages/native/main/default/flows/Example_1.flow-meta.xml'))).to.equal(false);
     }
+  });
+  it('blocks an association collision before publishing any native member', async () => {
+    const artifactFile = join(project, 'mcnext/campaign-flow-associations', `${campaignId}.mcn-flow-associations.json`);
+    await mkdir(dirname(artifactFile), { recursive: true });
+    await writeFile(artifactFile, 'existing association');
+    const actual = await retrieve({ records: [record(1), record(2)] });
+    expect(actual.state).to.equal('failed');
+    expect(actual.files).to.deep.equal([]);
+    expect(actual.associationArtifactFile).not.to.exist;
+    expect(actual.associationArtifact).not.to.exist;
+    expect(actual.diagnostics.join('\n')).to.include(artifactFile);
+    expect(await readFile(artifactFile, 'utf8')).to.equal('existing association');
+    expect(existsSync(join(project, 'packages/native/main/default/flows/Example_1.flow-meta.xml'))).to.equal(false);
+  });
+  for (const failure of ['writeFile', 'close'] as const)
+    it(`retains closed native files without association evidence after artifact ${failure} failure`, async () => {
+      const artifactFile = join(
+        project,
+        'mcnext/campaign-flow-associations',
+        `${campaignId}.mcn-flow-associations.json`
+      );
+      const original = filesystem.open;
+      let closed = false;
+      sinon.stub(filesystem, 'open').callsFake(async (...args: Parameters<typeof filesystem.open>) => {
+        const handle = await original(...args);
+        if (String(args[0]) === artifactFile) {
+          const close = handle.close.bind(handle);
+          sinon.stub(handle, 'close').callsFake(async () => {
+            await close();
+            closed = true;
+            if (failure === 'close') throw new Error('artifact close failed');
+          });
+          if (failure === 'writeFile') sinon.stub(handle, 'writeFile').rejects(new Error('artifact write failed'));
+        }
+        return handle;
+      });
+      const actual = await retrieve({ records: [record(1), record(2)] });
+      expect(actual.state).to.equal('failed');
+      expect(closed).to.equal(true);
+      expect(actual.files).to.have.length(2);
+      await Promise.all(
+        actual.files.map(async (file) => expect(await readFile(file.filePath)).to.deep.equal(Buffer.from(xml)))
+      );
+      expect(actual.associationArtifactFile).not.to.exist;
+      expect(actual.associationArtifact).not.to.exist;
+      expect(actual.diagnostics.join('\n')).to.include(artifactFile);
+      expect(existsSync(actual.stagingProject!)).to.equal(true);
+    });
+  it('rejects unsupported evidence API before discovery', async () => {
+    const actual = await retrieveCampaignFlows(
+      { projectRoot: project, targetOrg: 'source', expectedOrgId: org, apiVersion: '66.0', campaignId },
+      transport()
+    );
+    expect(actual.state).to.equal('blocked');
+    expect(calls).to.deep.equal([]);
+    expect(actual.associationArtifactFile).not.to.exist;
   });
   it('preflights all destinations and preserves an existing second-member sentinel', async () => {
     const folder = join(project, 'other/main/default/flows');

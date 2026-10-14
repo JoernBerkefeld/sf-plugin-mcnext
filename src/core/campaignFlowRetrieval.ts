@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import filesystem, { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
@@ -20,12 +21,29 @@ export type CampaignFlowRetrievalInput = {
   campaignId: string;
   waitMinutes?: number;
 };
+export type CampaignFlowAssociationArtifact = {
+  schemaVersion: 1;
+  kind: 'campaign-flow-associations';
+  source: { orgId: string; apiVersion: string; campaignId: string };
+  flows: Array<{
+    member: string;
+    flowRecordId: string;
+    associatedRecordId: string;
+    segmentId: string | null;
+    definitionId: string;
+    latestVersionId: string;
+    nativeFile: string;
+    nativeSha256: string;
+  }>;
+};
 export type CampaignFlowRetrievalResult = {
   campaignId: string;
   state: 'succeeded' | 'blocked' | 'pending' | 'failed';
   members: string[];
   files: Array<{ member: string; filePath: string }>;
   associationPersistence: 'blocked';
+  associationArtifactFile?: string;
+  associationArtifact?: CampaignFlowAssociationArtifact;
   diagnostics: string[];
   jobId?: string;
   stagingProject?: string;
@@ -50,6 +68,7 @@ export async function retrieveCampaignFlows(
     diagnostics: ['Native Flow XML does not preserve Campaign attachment; this is not a full backup'],
   };
   try {
+    if (input.apiVersion !== '67.0') throw new Error('Campaign Flow association evidence requires API 67.0');
     const campaign = await runCampaign({ ...input, operation: 'export', recordId: input.campaignId }, runner);
     if (campaign.operation !== 'export') throw new Error('Expected fresh Campaign export discovery');
     const discovery = campaign.diagnostics.associatedArtifacts;
@@ -121,9 +140,35 @@ export async function retrieveCampaignFlows(
         const destination = join(root, relative(staging, source));
         await safePath(destination);
         if (await exists(destination)) throw new Error('Native Flow destination already exists; no overwrite');
-        return { member, destination, bytes };
+        return { member, destination, bytes, flow };
       })
     );
+    const associationFile = join(
+      root,
+      'mcnext',
+      'campaign-flow-associations',
+      `${input.campaignId}.mcn-flow-associations.json`
+    );
+    await safePath(associationFile);
+    if (await exists(associationFile)) {
+      result.diagnostics.push(`Association artifact publication not confirmed: ${associationFile}`);
+      throw new Error('Association artifact destination already exists; no overwrite');
+    }
+    const artifact: CampaignFlowAssociationArtifact = {
+      schemaVersion: 1,
+      kind: 'campaign-flow-associations',
+      source: { orgId: input.expectedOrgId, apiVersion: input.apiVersion, campaignId: input.campaignId },
+      flows: publications.map(({ member, destination, bytes, flow }) => ({
+        member,
+        flowRecordId: String(flow.record.Id),
+        associatedRecordId: String(flow.record.AssociatedRecordId),
+        segmentId: flow.record.SegmentId as string | null,
+        definitionId: String(flow.toolingDefinition!.Id),
+        latestVersionId: String(flow.toolingDefinition!.LatestVersionId),
+        nativeFile: relative(root, destination),
+        nativeSha256: createHash('sha256').update(bytes).digest('hex'),
+      })),
+    };
     // All paths and XML pass preflight before any repository file is published.
     for (const publication of publications) {
       // eslint-disable-next-line no-await-in-loop -- publication order reports exact partial outcomes
@@ -147,6 +192,22 @@ export async function retrieveCampaignFlows(
         result.diagnostics.push(`Native Flow publication not confirmed: ${publication.destination}`);
         throw error;
       }
+    }
+    try {
+      await safePath(associationFile);
+      await mkdir(dirname(associationFile), { recursive: true });
+      await safePath(associationFile);
+      const handle = await filesystem.open(associationFile, 'wx');
+      try {
+        await handle.writeFile(`${JSON.stringify(artifact, undefined, 2)}\n`);
+      } finally {
+        await handle.close();
+      }
+      result.associationArtifactFile = associationFile;
+      result.associationArtifact = artifact;
+    } catch (error) {
+      result.diagnostics.push(`Association artifact publication not confirmed: ${associationFile}`);
+      throw error;
     }
     result.state = 'succeeded';
     try {
@@ -189,10 +250,24 @@ function validateDiscovery(discovery: Discovery, campaignId: string): Discovered
     )
       throw new Error('Duplicate, malformed or mismatched associated Flow identity');
     validateToolingIdentity(definition, version, record.ApiName);
+    const start = (version.Metadata as Record<string, unknown>).start;
+    const selectedSegment = object(start) ? start.segment : undefined;
+    validateSegmentSelection(record.SegmentId, selectedSegment, 'Tooling start');
     ids.add(record.Id);
     members.add(record.ApiName);
   }
   return discovery.flows;
+}
+
+function validateSegmentSelection(recordSegment: unknown, selectedSegment: unknown, origin: string): void {
+  if (
+    recordSegment === null
+      ? selectedSegment !== undefined && selectedSegment !== null
+      : typeof recordSegment !== 'string' ||
+        !/^1sg[A-Za-z0-9]{15}$/.test(recordSegment) ||
+        selectedSegment !== recordSegment
+  )
+    throw new Error(`FlowRecord SegmentId does not match the discovered ${origin} selection`);
 }
 
 function validateToolingIdentity(
@@ -257,8 +332,10 @@ async function validateXml(bytes: Buffer, flow: DiscoveredFlow): Promise<void> {
     throw new Error('Native XML must have a Salesforce Flow root');
   const metadata = flow.toolingFlow!.Metadata as Record<string, unknown>;
   const start = metadata.start;
+  const xmlStart = Array.isArray(parsed.Flow.start) ? (parsed.Flow.start[0] as unknown) : undefined;
+  const xmlSegment: unknown = object(xmlStart) && Array.isArray(xmlStart.segment) ? xmlStart.segment[0] : undefined;
+  validateSegmentSelection(flow.record.SegmentId, xmlSegment, 'native XML');
   if (object(start) && start.triggerType === 'Segment') {
-    const xmlStart = Array.isArray(parsed.Flow.start) ? (parsed.Flow.start[0] as unknown) : undefined;
     if (
       !object(xmlStart) ||
       !Array.isArray(xmlStart.triggerType) ||

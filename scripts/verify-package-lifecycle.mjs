@@ -64,6 +64,7 @@ try {
     'mcnext:data-graph:metadata',
     'mcnext:email-template:show',
     'mcnext:email:send-definition:show',
+    'mcnext:flow:association',
     'mcnext:flow:source',
     'mcnext:identity-resolution:export',
     'mcnext:identity-resolution:list',

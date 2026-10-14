@@ -219,6 +219,65 @@ describe('real retrieve-all execution', () => {
       expect(JSON.stringify(projected)).not.to.include(forbidden);
   });
 
+  it('projects only scalar association evidence and inventories only confirmed artifact files', async () => {
+    const nativeFile = join(input.projectRoot, 'confirmed-native.xml');
+    const artifactFile = join(input.projectRoot, 'confirmed-associations.json');
+    await writeFile(nativeFile, 'native');
+    const artifact = {
+      schemaVersion: 1 as const,
+      kind: 'campaign-flow-associations' as const,
+      source: { orgId, apiVersion: '67.0', campaignId, token: 'private-source-token' },
+      flows: [
+        {
+          member: 'ExactFlow',
+          flowRecordId: '2aF000000000001AAA',
+          associatedRecordId: campaignId,
+          segmentId: null,
+          definitionId: '300000000000001AAA',
+          latestVersionId: '301000000000001AAA',
+          nativeFile: 'confirmed-native.xml',
+          nativeSha256: createHash('sha256').update('native').digest('hex'),
+          bytes: Buffer.from('private-bytes'),
+          token: 'private-flow-token',
+        },
+      ],
+      stagingOwner: { token: 'private-owner-token' },
+    };
+    await writeFile(artifactFile, JSON.stringify(artifact));
+    services.flows = async () => ({
+      campaignId,
+      state: 'succeeded',
+      members: ['ExactFlow'],
+      files: [{ member: 'ExactFlow', filePath: nativeFile }],
+      associationPersistence: 'blocked',
+      diagnostics: [],
+      associationArtifactFile: artifactFile,
+      associationArtifact: artifact,
+    });
+    const projected = projectRetrieveAllResult(await retrieveAll(input, services));
+    const flow = projected.providers.find((row) => row.family === `campaign-flows:${campaignId}`)!;
+    expect(flow.files).to.deep.equal([nativeFile, artifactFile]);
+    expect(projected.files).to.include.members(flow.files);
+    expect(flow.evidence?.associationArtifactFile).to.equal(artifactFile);
+    expect(flow.evidence?.associationArtifact?.flows[0].member).to.equal('ExactFlow');
+    for (const forbidden of ['private-', 'stagingOwner', '"type":"Buffer"'])
+      expect(JSON.stringify(projected)).not.to.include(forbidden);
+    services.flows = async () => ({
+      campaignId,
+      state: 'failed',
+      members: ['ExactFlow'],
+      files: [{ member: 'ExactFlow', filePath: nativeFile }],
+      associationPersistence: 'blocked',
+      diagnostics: [`Association artifact publication not confirmed: ${artifactFile}`],
+    });
+    const failed = projectRetrieveAllResult(await retrieveAll(input, services));
+    const failedFlow = failed.providers.find((row) => row.family === `campaign-flows:${campaignId}`)!;
+    expect(failedFlow.files).to.deep.equal([nativeFile]);
+    expect(failed.files).not.to.include(artifactFile);
+    expect(failedFlow.evidence?.associationArtifact).not.to.exist;
+    expect(failedFlow.evidence?.associationArtifactFile).not.to.exist;
+    expect(failed.complete).to.equal(false);
+  });
   it('isolates provider rejection without erasing earlier completed files', async () => {
     services.marketingCms = async () => {
       throw new Error('Dependency failed token=secret');
@@ -311,6 +370,22 @@ describe('real retrieve-all execution', () => {
       expect(await readFile(path)).to.deep.equal(xml);
       const projected = projectRetrieveAllResult(internal);
       expect(projected.files.filter((file) => file === path)).to.deep.equal([path]);
+      const first = projected.providers.find((row) => row.family === `campaign-flows:${campaignId}`)!;
+      const associationFile = join(
+        input.projectRoot,
+        'mcnext/campaign-flow-associations',
+        `${campaignId}.mcn-flow-associations.json`
+      );
+      const artifact: unknown = JSON.parse(await readFile(associationFile, 'utf8'));
+      expect(first.files).to.deep.equal([path, associationFile]);
+      expect(projected.files.filter((file) => file === associationFile)).to.deep.equal([associationFile]);
+      expect(first.evidence?.associationArtifactFile).to.equal(associationFile);
+      expect(first.evidence?.associationArtifact).to.deep.equal(artifact);
+      expect(first.evidence?.associationArtifact?.flows[0]).to.include({
+        segmentId: null,
+        nativeSha256: createHash('sha256').update(xml).digest('hex'),
+      });
+      expect(projected.complete).to.equal(false);
       const second = projected.providers.find((row) => row.family === `campaign-flows:${secondId}`)!;
       expect(second.state).to.equal('blocked');
       expect(second.files).to.deep.equal([]);

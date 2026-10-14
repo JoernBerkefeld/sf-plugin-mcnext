@@ -1,6 +1,10 @@
 import { Org } from '@salesforce/core';
 import { redact } from '../cms/cmsCli.js';
-import { retrieveCampaignFlows, type CampaignFlowRetrievalResult } from '../core/campaignFlowRetrieval.js';
+import {
+  retrieveCampaignFlows,
+  type CampaignFlowAssociationArtifact,
+  type CampaignFlowRetrievalResult,
+} from '../core/campaignFlowRetrieval.js';
 import { runCore, type CoreRunner } from '../core/flowCli.js';
 import {
   correlateCampaignSegmentDefinitions,
@@ -64,6 +68,8 @@ export type RetrieveAllPublicEvidence = {
   campaigns?: Array<{ campaignId: string; state: RetrieveAllState; files: string[]; diagnostics: string[] }>;
   members?: string[];
   associationPersistence?: 'blocked';
+  associationArtifactFile?: string;
+  associationArtifact?: CampaignFlowAssociationArtifact;
   correlation?: CampaignSegmentCorrelationResult;
   rulesetIds?: string[];
   cms?: {
@@ -149,7 +155,34 @@ function publicEvidence(result: NonNullable<RetrieveAllProvider['result']>): Ret
       })),
     };
   if ('members' in result)
-    return { members: [...result.members], associationPersistence: result.associationPersistence };
+    return {
+      members: [...result.members],
+      associationPersistence: result.associationPersistence,
+      ...(result.associationArtifactFile && result.associationArtifact
+        ? {
+            associationArtifactFile: result.associationArtifactFile,
+            associationArtifact: {
+              schemaVersion: result.associationArtifact.schemaVersion,
+              kind: result.associationArtifact.kind,
+              source: {
+                orgId: result.associationArtifact.source.orgId,
+                apiVersion: result.associationArtifact.source.apiVersion,
+                campaignId: result.associationArtifact.source.campaignId,
+              },
+              flows: result.associationArtifact.flows.map((flow) => ({
+                member: flow.member,
+                flowRecordId: flow.flowRecordId,
+                associatedRecordId: flow.associatedRecordId,
+                segmentId: flow.segmentId,
+                definitionId: flow.definitionId,
+                latestVersionId: flow.latestVersionId,
+                nativeFile: flow.nativeFile,
+                nativeSha256: flow.nativeSha256,
+              })),
+            },
+          }
+        : {}),
+    };
   if ('flows' in result)
     return {
       correlation: {
@@ -254,7 +287,10 @@ export async function retrieveAll(
                 !result.files.length
               ? 'blocked'
               : result.state,
-          files: result.files.map((file) => file.filePath),
+          files: [
+            ...result.files.map((file) => file.filePath),
+            ...(result.associationArtifactFile && result.associationArtifact ? [result.associationArtifactFile] : []),
+          ],
           diagnostics: result.diagnostics,
           ...(result.stagingProject ? { stagingDirectory: result.stagingProject } : {}),
           ...(result.retainedRoot ? { retainedRoot: result.retainedRoot } : {}),
