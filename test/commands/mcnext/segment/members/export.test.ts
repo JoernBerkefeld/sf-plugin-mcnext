@@ -3,6 +3,7 @@ import { isAbsolute, join } from 'node:path';
 import { Org } from '@salesforce/core';
 import { TestContext } from '@salesforce/core/testSetup';
 import { expect } from 'chai';
+import { parse } from 'csv-parse/sync';
 import { Org as FlagOrg } from '../../../../../node_modules/@salesforce/sf-plugins-core/node_modules/@salesforce/core/lib/org/org.js';
 import { McnClient, PaginationLimits } from '../../../../../src/client/mcnClient.js';
 import SegmentMembersExport, {
@@ -484,6 +485,7 @@ describe('mcnext segment members export', () => {
                 {
                   apiName: 'Annual_Promo',
                   displayName: 'Annual Promo',
+                  marketSegmentId: '1sgaj000000PveDAAG',
                   segmentMembershipDmo: { latestTable: 'Individual_Unified_SM_1__dlm' },
                   segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
                 },
@@ -496,7 +498,11 @@ describe('mcnext segment members export', () => {
               metadata: [
                 {
                   name: 'Individual_Unified_SM_1__dlm',
-                  fields: [{ name: 'Id__c' }, { name: 'Individual_Id__c', keyQualifier: 'Membership' }],
+                  fields: [
+                    { name: 'Id__c' },
+                    { name: 'Individual_Id__c', keyQualifier: 'Membership' },
+                    { name: 'Segment_Id__c', type: 'TEXT' },
+                  ],
                   primaryKeys: ['Id__c'],
                   relationships: [
                     {
@@ -641,6 +647,7 @@ describe('mcnext segment members export', () => {
               segments: [
                 {
                   apiName: 'Annual_Promo',
+                  marketSegmentId: '1sgaj000000PveDAAG',
                   segmentMembershipDmo: { latestTable: 'Individual_Unified_SM_1__dlm' },
                   segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
                 },
@@ -655,7 +662,11 @@ describe('mcnext segment members export', () => {
               metadata: [
                 {
                   name: 'Individual_Unified_SM_1__dlm',
-                  fields: [{ name: 'Id__c' }, { name: 'Individual_Id__c', keyQualifier: 'Membership' }],
+                  fields: [
+                    { name: 'Id__c' },
+                    { name: 'Individual_Id__c', keyQualifier: 'Membership' },
+                    { name: 'Segment_Id__c', type: 'TEXT' },
+                  ],
                   primaryKeys: ['Id__c'],
                   relationships: [
                     {
@@ -747,6 +758,228 @@ describe('mcnext segment members export', () => {
     });
   }
 
+  it('excludes foreign segment rows when two descriptors share the latest membership DMO', async () => {
+    const columns = Array.from({ length: 19 }, (_, index) => ({
+      name: index === 0 ? 'ssot__Id__c' : `Field${index}__c`,
+      type: 'TEXT',
+    }));
+    const descriptors = [
+      { apiName: 'Selected', marketSegmentId: '1sgaj000000PveDAAG' },
+      { apiName: 'Foreign', marketSegmentId: '1sgaj000000PveEAAG' },
+    ].map((descriptor) => ({
+      ...descriptor,
+      segmentMembershipDmo: { latestTable: 'Shared_Membership__dlm' },
+      segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
+    }));
+    const memberships = [
+      { segmentId: '1sgaj000000PveD', value: 'selected-member' },
+      { segmentId: '1sgaj000000PveE', value: 'foreign-member' },
+    ];
+    const sqlQueries: string[] = [];
+    const client = {
+      request: async (request: RequestOptions) => {
+        const descriptor = descriptors.find((candidate) => request.path === `/ssot/segments/${candidate.apiName}`);
+        if (descriptor) return { segments: [descriptor] };
+        if (request.path === '/query')
+          return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+        if (request.path === '/ssot/metadata')
+          return {
+            metadata: [
+              {
+                name: 'Shared_Membership__dlm',
+                fields: [{ name: 'Id__c' }, { name: 'Segment_Id__c', type: 'TEXT' }],
+                primaryKeys: ['Id__c'],
+                relationships: [
+                  {
+                    fromEntity: 'Shared_Membership__dlm',
+                    toEntity: 'UnifiedssotIndividualMkt__dlm',
+                    fromField: 'Id__c',
+                    toField: 'ssot__Id__c',
+                    cardinality: 'NTOONE',
+                  },
+                ],
+              },
+              {
+                name: 'UnifiedssotIndividualMkt__dlm',
+                fields: columns,
+                primaryKeys: ['ssot__Id__c'],
+                relationships: [],
+              },
+            ],
+          };
+        const sql = (request.body as { sql: string }).sql;
+        sqlQueries.push(sql);
+        const filter = /WHERE m\."Segment_Id__c" = '([^']+)'/u.exec(sql)?.[1];
+        const selected = memberships.filter((member) => filter === undefined || member.segmentId === filter);
+        return {
+          queryId: 'shared-query',
+          metadata: [
+            ...columns.map(({ name }) => ({ name })),
+            { name: 'membership_key_internal' },
+            { name: 'detail_match_count_internal' },
+          ],
+          data: selected.map((member) => [...columns.map(() => member.value), member.value, 1]),
+          totalSize: selected.length,
+        };
+      },
+    } as unknown as McnClient;
+    for (const descriptor of descriptors) {
+      const outputFile = join(directory, `${descriptor.apiName}.json`);
+      // eslint-disable-next-line no-await-in-loop -- serial exports preserve query assertion order
+      const result = await exportSegmentMembers({
+        client,
+        segment: descriptor.apiName,
+        outputFile,
+        resultFormat: 'json',
+        includeDetails: true,
+        limit: 200,
+        paginationLimits: {},
+      });
+      expect(result.rowsWritten).to.equal(1);
+      // eslint-disable-next-line no-await-in-loop -- inspect each completed export before the next request
+      const text = await readFile(outputFile, 'utf8');
+      expect(text).to.contain(descriptor.apiName === 'Selected' ? 'selected-member' : 'foreign-member');
+      expect(text).not.to.contain(descriptor.apiName === 'Selected' ? 'foreign-member' : 'selected-member');
+    }
+    expect(sqlQueries[0]).to.contain('WHERE m."Segment_Id__c" = \'1sgaj000000PveD\'');
+    expect(sqlQueries[1]).to.contain('WHERE m."Segment_Id__c" = \'1sgaj000000PveE\'');
+  });
+
+  for (const failLastPage of [false, true]) {
+    it(
+      failLastPage
+        ? 'preserves the destination when enriched CSV paging fails after more than 1000 rows'
+        : 'exports more than 1000 enriched CSV rows with 19 columns and exact continuation offsets',
+      async () => {
+        const columns = Array.from({ length: 19 }, (_, index) => ({
+          name: index === 0 ? 'ssot__Id__c' : `Field${String(index).padStart(2, '0')}__c`,
+          displayName: `Field ${index}`,
+          type: 'Text',
+          ...(index === 0 ? { keyQualifier: 'Individual' } : {}),
+        }));
+        const expectedRows = Array.from({ length: 1505 }, (_, row) =>
+          columns.map((_field, column) =>
+            column === 1 ? `Member ${row}, "quoted"\nsecond line` : `value-${row}-${column}`
+          )
+        );
+        const metadata = [
+          ...columns.map((column) => ({ name: column.name })),
+          { name: 'membership_key_internal' },
+          { name: 'detail_match_count_internal' },
+        ];
+        const requests: RequestOptions[] = [];
+        const outputFile = join(directory, 'paged-details.csv');
+        const sentinel = Buffer.from([0, 255, 10, 13, 7]);
+        await writeFile(outputFile, sentinel);
+        const client = {
+          request: async (request: RequestOptions) => {
+            requests.push(request);
+            if (request.path === '/ssot/segments/Annual_Promo') {
+              return {
+                segments: [
+                  {
+                    apiName: 'Annual_Promo',
+                    marketSegmentId: '1sgaj000000PveDAAG',
+                    segmentMembershipDmo: { latestTable: 'Individual_Unified_SM_1__dlm' },
+                    segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
+                  },
+                ],
+              };
+            }
+            if (request.path === '/query') {
+              return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+            }
+            if (request.path === '/ssot/metadata') {
+              return {
+                metadata: [
+                  {
+                    name: 'Individual_Unified_SM_1__dlm',
+                    fields: [
+                      { name: 'Id__c' },
+                      { name: 'Individual_Id__c', keyQualifier: 'Membership' },
+                      { name: 'Segment_Id__c', type: 'TEXT' },
+                    ],
+                    primaryKeys: ['Id__c'],
+                    relationships: [
+                      {
+                        fromEntity: 'Individual_Unified_SM_1__dlm',
+                        toEntity: 'UnifiedssotIndividualMkt__dlm',
+                        fromField: 'Individual_Id__c',
+                        toField: 'ssot__Id__c',
+                        fromKeyQualifier: 'Membership',
+                        toKeyQualifier: 'Individual',
+                        cardinality: 'many-to-one',
+                      },
+                    ],
+                  },
+                  {
+                    name: 'UnifiedssotIndividualMkt__dlm',
+                    fields: columns,
+                    primaryKeys: ['ssot__Id__c'],
+                    relationships: [],
+                  },
+                ],
+              };
+            }
+            const isSubmission = request.path === '/ssot/query-sql';
+            expect(request.path).to.equal(isSubmission ? '/ssot/query-sql' : '/ssot/query-sql/query-many/rows');
+            expect(request.headers).to.deep.equal({ 'Data-Space': 'default' });
+            if (isSubmission) expect(request.method).to.equal('POST');
+            const offset = isSubmission ? 0 : Number(request.query?.offset);
+            if (failLastPage && offset === 1500) {
+              expect(await readFile(outputFile)).to.deep.equal(sentinel);
+              expect((await readdir(directory)).some((name) => name.endsWith('.stage'))).to.equal(true);
+              throw new Error('late enriched page failed');
+            }
+            return {
+              queryId: 'query-many',
+              metadata,
+              data: expectedRows
+                .slice(offset, offset + 500)
+                .map((row, index) => [...row, `membership-${offset + index}`, 1]),
+              offset,
+              rowLimit: 500,
+              totalSize: expectedRows.length,
+            };
+          },
+        } as unknown as McnClient;
+        const exporting = exportSegmentMembers({
+          client,
+          segment: 'Annual_Promo',
+          outputFile,
+          resultFormat: 'csv',
+          includeDetails: true,
+          limit: 500,
+          paginationLimits: {},
+        });
+
+        if (failLastPage) {
+          const error = await captureError(exporting);
+          expect(error.message).to.contain('late enriched page failed');
+          expect(await readFile(outputFile)).to.deep.equal(sentinel);
+        } else {
+          const result = await exporting;
+          const records = parse(await readFile(outputFile, 'utf8'));
+          const headers = columns.map((column) => column.displayName);
+          expect(result).to.include({ rowsWritten: 1505, complete: true });
+          expect(records).to.have.length(1506);
+          expect(records[0]).to.deep.equal(headers);
+          expect(records.filter((row) => row[0] === headers[0])).to.have.length(1);
+          expect(records.every((row) => row.length === 19)).to.equal(true);
+          expect(records.slice(1)).to.deep.equal(expectedRows);
+        }
+        expect(
+          requests.filter((request) => request.path.endsWith('/rows')).map((request) => request.query)
+        ).to.deep.equal([
+          { offset: 500, rowLimit: 500 },
+          { offset: 1000, rowLimit: 500 },
+          { offset: 1500, rowLimit: 500 },
+        ]);
+        expect(await readdir(directory)).to.deep.equal(['paged-details.csv']);
+      }
+    );
+  }
+
   it('uses API-name headers consistently for enriched CSV and JSON', async () => {
     const columns = Array.from({ length: 19 }, (_, index) => ({
       name: index === 0 ? 'ssot__Id__c' : `Field${String(index).padStart(2, '0')}__c`,
@@ -763,6 +996,7 @@ describe('mcnext segment members export', () => {
               segments: [
                 {
                   apiName: 'Annual_Promo',
+                  marketSegmentId: '1sgaj000000PveDAAG',
                   segmentMembershipDmo: { latestTable: 'Individual_Unified_SM_1__dlm' },
                   segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
                 },
@@ -775,7 +1009,11 @@ describe('mcnext segment members export', () => {
               metadata: [
                 {
                   name: 'Individual_Unified_SM_1__dlm',
-                  fields: [{ name: 'Id__c' }, { name: 'Individual_Id__c', keyQualifier: 'Membership' }],
+                  fields: [
+                    { name: 'Id__c' },
+                    { name: 'Individual_Id__c', keyQualifier: 'Membership' },
+                    { name: 'Segment_Id__c', type: 'TEXT' },
+                  ],
                   primaryKeys: ['Id__c'],
                   relationships: [
                     {
@@ -842,6 +1080,7 @@ describe('mcnext segment members export', () => {
             segments: [
               {
                 apiName: 'Annual_Promo',
+                marketSegmentId: '1sgaj000000PveDAAG',
                 segmentMembershipDmo: { latestTable: 'Individual_Unified_SM_1__dlm' },
                 segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
               },
@@ -886,6 +1125,7 @@ describe('mcnext segment members export', () => {
             segments: [
               {
                 apiName: 'Annual_Promo',
+                marketSegmentId: '1sgaj000000PveDAAG',
                 segmentMembershipDmo: { latestTable: 'Individual_Unified_SM_1__dlm' },
                 segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
               },
@@ -900,7 +1140,11 @@ describe('mcnext segment members export', () => {
             metadata: [
               {
                 name: 'Individual_Unified_SM_1__dlm',
-                fields: [{ name: 'Id__c' }, { name: 'Individual_Id__c', keyQualifier: 'Membership' }],
+                fields: [
+                  { name: 'Id__c' },
+                  { name: 'Individual_Id__c', keyQualifier: 'Membership' },
+                  { name: 'Segment_Id__c', type: 'TEXT' },
+                ],
                 primaryKeys: ['Id__c'],
                 relationships: [
                   {
@@ -992,6 +1236,50 @@ describe('mcnext segment members export', () => {
       /* eslint-enable no-await-in-loop */
     }
   });
+
+  for (const marketSegmentId of [undefined, '', '001aj000000PveD']) {
+    it(`fails closed before querying when the resolved MarketSegment ID is ${String(marketSegmentId)}`, async () => {
+      const outputFile = join(directory, 'invalid-id.json');
+      await writeFile(outputFile, 'original');
+      const requests: string[] = [];
+      const client = {
+        request: async (request: RequestOptions) => {
+          requests.push(request.path);
+          if (request.path === '/ssot/segments/Annual_Promo')
+            return {
+              segments: [
+                {
+                  apiName: 'Annual_Promo',
+                  marketSegmentId,
+                  segmentMembershipDmo: { latestTable: 'Shared_Membership__dlm' },
+                  segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
+                },
+              ],
+            };
+          if (request.path === '/query')
+            return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+          throw new Error('Must not query metadata or memberships without a valid identity');
+        },
+      } as unknown as McnClient;
+      const error = await captureError(
+        exportSegmentMembers({
+          client,
+          segment: 'Annual_Promo',
+          outputFile,
+          resultFormat: 'json',
+          includeDetails: true,
+          limit: 200,
+          paginationLimits: {},
+        })
+      );
+      expect(error.name).to.equal(
+        marketSegmentId === undefined ? 'InvalidSegmentMemberDetailSource' : 'InvalidMarketSegmentId'
+      );
+      expect(requests).not.to.include('/ssot/query-sql');
+      expect(requests).not.to.include('/ssot/metadata');
+      expect(await readFile(outputFile, 'utf8')).to.equal('original');
+    });
+  }
 
   it('preserves the destination when the resolved detail envelope is malformed', async () => {
     const outputFile = join(directory, 'details.json');

@@ -167,8 +167,7 @@ export default class SegmentMembersExport extends SfCommand<SegmentMembersExport
         ...(flags['max-items'] === undefined ? {} : { maxItems: flags['max-items'] }),
         ...(flags['max-duration-ms'] === undefined ? {} : { maxDurationMs: flags['max-duration-ms'] }),
       },
-      onSegmentResolved: (segmentApiName) =>
-        this.logToStderr(`Found segment ${segmentApiName}. Starting download.`),
+      onSegmentResolved: (segmentApiName) => this.logToStderr(`Found segment ${segmentApiName}. Starting download.`),
       onProgress: ({ batch, expectedBatches }) =>
         this.logToStderr(`Downloading batch ${batch}${expectedBatches === undefined ? '' : ` of ${expectedBatches}`}`),
     });
@@ -226,7 +225,8 @@ export async function exportSegmentMembers(options: ExportOptions): Promise<Segm
     limit: options.limit,
     offset: options.offset,
   };
-  const generatedSegment = options.outputFile === undefined ? await resolveSegment(options.client, options.segment) : undefined;
+  const generatedSegment =
+    options.outputFile === undefined ? await resolveSegment(options.client, options.segment) : undefined;
   const resolved = await createSegmentMembersRequest(
     options.client,
     options.segment,
@@ -296,7 +296,14 @@ function extractDetailSource(segment: SegmentDescriptor): SegmentMemberDetailSou
   if (typeof segmentOnDmo !== 'string' || !segmentOnDmo.trim()) {
     throw new SfError('Segment detail response is missing segmentOnApiName.', 'InvalidSegmentMemberDetailSource');
   }
-  return { latestMembershipDmo: latestMembershipDmo.trim(), segmentOnDmo: segmentOnDmo.trim() };
+  if (typeof segment.marketSegmentId !== 'string') {
+    throw new SfError('Segment detail response is missing marketSegmentId.', 'InvalidSegmentMemberDetailSource');
+  }
+  return {
+    marketSegmentId: segment.marketSegmentId,
+    latestMembershipDmo: latestMembershipDmo.trim(),
+    segmentOnDmo: segmentOnDmo.trim(),
+  };
 }
 
 async function writeObjectRows(
@@ -363,10 +370,7 @@ async function writeArrayRows(
   return rowsWritten;
 }
 
-export function resolveColumnHeaders(
-  columns: SegmentMemberDetailColumn[],
-  mode: 'label' | 'api-name'
-): string[] {
+export function resolveColumnHeaders(columns: SegmentMemberDetailColumn[], mode: 'label' | 'api-name'): string[] {
   const occupied = new Set<string>();
   return columns.map((column) => {
     const base = mode === 'label' ? column.label.trim() || column.name : column.name;
@@ -410,10 +414,9 @@ async function resolveOutputFile(
 ): Promise<ResolvedOutputFile> {
   if (requested !== undefined) return { path: resolve(requested) };
   const now = new Date();
-  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(
-    2,
-    '0'
-  )}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(
+  const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate()
+  ).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(
     now.getSeconds()
   ).padStart(2, '0')}`;
   const stem = `${sanitizeFilename(segmentName)}-${timestamp}`;

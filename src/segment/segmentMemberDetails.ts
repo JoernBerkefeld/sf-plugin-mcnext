@@ -13,6 +13,7 @@ const INTERNAL_MATCH_COUNT_COLUMN = 'detail_match_count_internal';
 
 /** Segment detail references required to discover an enriched member query. */
 export type SegmentMemberDetailSource = {
+  marketSegmentId: string;
   latestMembershipDmo: string;
   segmentOnDmo: string;
 };
@@ -28,6 +29,7 @@ export type SegmentMemberDetailColumn = {
 /** Validated metadata contract used to build the enriched query. */
 export type SegmentMemberDetailDiscovery = {
   dataSpace: string;
+  marketSegmentId: string;
   membershipDmo: string;
   segmentOnDmo: string;
   membershipKeyField: string;
@@ -149,6 +151,7 @@ export async function discoverSegmentMemberDetails(
   dataSpace = DEFAULT_DATA_SPACE
 ): Promise<SegmentMemberDetailDiscovery> {
   const normalizedSpace = requireNonempty(dataSpace, 'Data space');
+  const marketSegmentId = normalizeMarketSegmentId(source.marketSegmentId);
   const membershipName = requireIdentifier(source.latestMembershipDmo, 'latest membership DMO');
   const detailName = requireIdentifier(source.segmentOnDmo, 'segment-on DMO');
   const response = await client.request<unknown>({
@@ -183,9 +186,15 @@ export async function discoverSegmentMemberDetails(
   requireRelationshipField(detail, relationship.toField, relationship.toKeyQualifier);
   const membershipKeyField = exactlyOne(membership.primaryKeys, `${membership.name} primary key`);
   requireField(membership, membershipKeyField);
+  requireField(membership, 'Segment_Id__c');
+  const segmentIdType = membership.fields.find((field) => field.name === 'Segment_Id__c')?.type?.toLowerCase();
+  if (segmentIdType !== 'text' && segmentIdType !== 'string') {
+    throw new SfError('Membership field Segment_Id__c must have text metadata.', 'InvalidSegmentMembershipFieldType');
+  }
 
   return {
     dataSpace: normalizedSpace,
+    marketSegmentId,
     membershipDmo: membership.name,
     segmentOnDmo: detail.name,
     membershipKeyField,
@@ -221,7 +230,9 @@ export function buildSegmentMemberDetailsSql(discovery: SegmentMemberDetailDisco
   );
   const innerQuery = `SELECT\n    ${projections.join(
     ',\n    '
-  )}\n  FROM ${membership} m\n  LEFT JOIN ${detail} d\n    ON m.${membershipJoin} IS NOT DISTINCT FROM d.${detailJoin}`;
+  )}\n  FROM ${membership} m\n  LEFT JOIN ${detail} d\n    ON m.${membershipJoin} IS NOT DISTINCT FROM d.${detailJoin}\n  WHERE m."Segment_Id__c" = ${escapeData360SqlLiteral(
+    normalizeMarketSegmentId(discovery.marketSegmentId)
+  )}`;
   const membershipAlias = quoteData360Identifier(INTERNAL_MEMBERSHIP_COLUMN);
   return `SELECT *\nFROM (\n  ${innerQuery.replaceAll(
     '\n',
@@ -237,12 +248,15 @@ export async function querySegmentMemberDetails(
 ): Promise<SegmentMemberDetailResult> {
   const dataSpace = await validateDataSpace(client, options.dataSpace);
   const discovery = await discoverSegmentMemberDetails(client, source, dataSpace);
+  const rowLimit = options.rowLimit ?? DEFAULT_ROW_LIMIT;
+  if (!Number.isSafeInteger(rowLimit) || rowLimit <= 0)
+    throw new SfError('Data 360 SQL row limit must be a positive integer.', 'InvalidData360RowLimit');
   const outputLimit = options.paginationLimits?.maxItems ?? DEFAULT_MAX_ITEMS;
   const sql = buildSegmentMemberDetailsSql(discovery, outputLimit);
   const submission = await client.request<unknown>({
     path: QUERY_PATH,
     method: 'POST',
-    body: { sql },
+    body: { sql, rowLimit },
     headers: { 'Data-Space': discovery.dataSpace },
   });
   const initial = parseQueryEnvelope(submission, 'query submission');
@@ -262,7 +276,8 @@ async function awaitReadyQuery(
   dataSpace: string,
   limits: SegmentMemberDetailQueryOptions['polling'] = {}
 ): Promise<QueryPage> {
-  if (hasRows(initial)) return initial;
+  if (hasRows(initial) && (!initial.queryId || queryIsComplete(initial) || !queryHasStatus(initial))) return initial;
+  if (queryIsComplete(initial)) return initial;
   const queryId = requireNonempty(initial.queryId ?? '', 'Query ID');
   const maxAttempts = limits.maxAttempts ?? 60;
   const maxDurationMs = limits.maxDurationMs ?? 5 * 60 * 1000;
@@ -277,10 +292,9 @@ async function awaitReadyQuery(
       headers: { 'Data-Space': dataSpace },
     });
     const status = parseQueryEnvelope(response, 'query status');
-    if (hasRows(status) || isComplete(status.status)) return { ...status, queryId };
-    if (isFailed(status.status)) {
-      throw new SfError(`Data 360 query ${queryId} ended with status ${String(status.status)}.`, 'Data360QueryFailed');
-    }
+    if (status.queryId !== undefined && status.queryId !== queryId)
+      throw new SfError('Data 360 query status returned a different query ID.', 'InvalidData360QueryEnvelope');
+    if (queryIsComplete(status) || (hasRows(status) && !queryHasStatus(status))) return { ...status, queryId };
   }
   throw new SfError(`Data 360 query ${queryId} did not complete within polling limits.`, 'Data360QueryTimeout');
 }
@@ -297,7 +311,7 @@ async function* iterateQueryRows(
   let offset = 0;
   let pages = 0;
   let emitted = 0;
-  let expectedTotal: number | undefined;
+  let expectedTotal = initial.queryId ? numericTotal(initial) : undefined;
   let expectedBatches: number | undefined;
   const rowLimit = options.rowLimit ?? DEFAULT_ROW_LIMIT;
   const maxPages = options.paginationLimits?.maxPages ?? 1000;
@@ -320,21 +334,31 @@ async function* iterateQueryRows(
       });
       page = parseQueryEnvelope(response, 'query rows');
     }
+    if (page.queryId !== undefined && page.queryId !== queryId)
+      throw new SfError('Data 360 query rows returned a different query ID.', 'InvalidData360QueryEnvelope');
+    if (queryId && queryHasStatus(page) && !queryIsComplete(page))
+      throw new SfError('Data 360 query rows are not complete.', 'InvalidData360RowsEnvelope');
     const rows = getRows(page);
     validateColumnMetadata(page.metadata, expectedNames);
+    if (!queryId) validateTerminalSinglePage(page, rows.length, numericTotal({ ...page, rowCount: undefined }));
     const total = numericTotal(page);
     if (total !== undefined) {
       if (expectedTotal !== undefined && expectedTotal !== total)
         throw new SfError('Data 360 query total count changed between pages.', 'InvalidData360RowsEnvelope');
       expectedTotal = total;
-      const calculatedBatches = Math.ceil(total / rowLimit);
+    }
+    if (expectedTotal !== undefined) {
+      const calculatedBatches = Math.ceil(expectedTotal / rowLimit);
       expectedBatches ??= calculatedBatches > 0 ? calculatedBatches : undefined;
     }
-    validateRowsPage(page, offset, rowLimit, rows.length, total);
-    if (!queryId) validateTerminalSinglePage(page, rows.length, total);
+    validateRowsPage(page, offset, rowLimit, rows.length, expectedTotal, page === initial);
     pages += 1;
     emitted += rows.length;
-    options.onProgress?.({ batch: pages, ...(expectedBatches === undefined ? {} : { expectedBatches }), rows: emitted });
+    options.onProgress?.({
+      batch: pages,
+      ...(expectedBatches === undefined ? {} : { expectedBatches }),
+      rows: emitted,
+    });
     if (emitted > maxItems)
       throw new SfError('Data 360 row pagination exceeded the item limit.', 'Data360RowsLimitError');
     for (const row of rows) {
@@ -359,7 +383,7 @@ async function* iterateQueryRows(
       yield row.slice(0, -2);
     }
     offset += rows.length;
-    if (rows.length === 0 || (total !== undefined && offset >= total)) return;
+    if (rows.length === 0 || (expectedTotal !== undefined && offset >= expectedTotal)) return;
     if (!queryId) return;
     page = { queryId };
   }
@@ -448,16 +472,16 @@ function parseQueryEnvelope(value: unknown, label: string): QueryPage {
   ) {
     throw new SfError(`Data 360 ${label} response has conflicting completion statuses.`, 'InvalidData360QueryEnvelope');
   }
-  const nestedQueryId = nestedStatus?.queryId;
-  if (
-    typeof record.queryId === 'string' &&
-    typeof nestedQueryId === 'string' &&
-    record.queryId.trim() !== nestedQueryId.trim()
-  ) {
+  const topLevelQueryId = record.queryId === undefined ? undefined : requireNonempty(record.queryId, 'Query ID');
+  const nestedQueryId =
+    nestedStatus?.queryId === undefined ? undefined : requireNonempty(nestedStatus.queryId, 'Query ID');
+  if (topLevelQueryId !== undefined && nestedQueryId !== undefined && topLevelQueryId !== nestedQueryId) {
     throw new SfError(`Data 360 ${label} response has conflicting query IDs.`, 'InvalidData360QueryEnvelope');
   }
   const page: QueryPage = {
-    ...(typeof record.queryId === 'string' ? { queryId: record.queryId } : {}),
+    ...(topLevelQueryId === undefined && nestedQueryId === undefined
+      ? {}
+      : { queryId: topLevelQueryId ?? nestedQueryId }),
     ...(topLevelStatus === undefined ? {} : { status: topLevelStatus }),
     ...(record.metadata === undefined ? {} : { metadata: record.metadata }),
     ...(record.data === undefined ? {} : { data: record.data }),
@@ -479,6 +503,12 @@ function parseQueryEnvelope(value: unknown, label: string): QueryPage {
   };
   if (!page.queryId && !page.status && page.completionStatus === undefined && !hasRows(page)) {
     throw new SfError(`Data 360 ${label} response is incomplete.`, 'InvalidData360QueryEnvelope');
+  }
+  if (isFailed(page.status) || (typeof page.completionStatus === 'string' && isFailed(page.completionStatus))) {
+    throw new SfError(
+      `Data 360 query ended with status ${String(page.completionStatus ?? page.status)}.`,
+      'Data360QueryFailed'
+    );
   }
   return page;
 }
@@ -511,11 +541,27 @@ function hasRows(page: QueryPage): boolean {
 }
 
 function numericTotal(page: QueryPage): number | undefined {
-  const total = page.totalSize ?? page.totalCount;
-  if (total === undefined) return undefined;
-  if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0)
+  const totals = [page.totalSize, page.totalCount, ...(queryIsComplete(page) ? [page.rowCount] : [])].filter(
+    (value) => value !== undefined
+  );
+  if (totals.length === 0) return undefined;
+  if (totals.some((total) => typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0))
     throw new SfError('Data 360 query rows response has an invalid total count.', 'InvalidData360RowsEnvelope');
-  return total;
+  if (totals.some((total) => total !== totals[0]))
+    throw new SfError('Data 360 query rows response has conflicting total counts.', 'InvalidData360RowsEnvelope');
+  return totals[0] as number;
+}
+
+function queryIsComplete(page: QueryPage): boolean {
+  return (
+    isComplete(page.status) ||
+    (typeof page.completionStatus === 'string' &&
+      (isComplete(page.completionStatus) || page.completionStatus === 'ResultsProduced'))
+  );
+}
+
+function queryHasStatus(page: QueryPage): boolean {
+  return page.status !== undefined || page.completionStatus !== undefined;
 }
 
 function isComplete(status: string | undefined): boolean {
@@ -657,16 +703,30 @@ function validateRowsPage(
   expectedOffset: number,
   requestedLimit: number,
   rowCount: number,
-  total: number | undefined
+  total: number | undefined,
+  initialPage: boolean
 ): void {
+  if (page.returnedRows !== undefined && page.returnedRows !== rowCount)
+    throw new SfError('Data 360 rows response has an unexpected returnedRows.', 'InvalidData360RowsEnvelope');
+  if (rowCount > requestedLimit)
+    throw new SfError('Data 360 rows response exceeds its requested rowLimit.', 'InvalidData360RowsEnvelope');
+  if (total !== undefined && expectedOffset < total && rowCount === 0)
+    throw new SfError('Data 360 rows response ended before its declared total.', 'InvalidData360RowsEnvelope');
   if (page.offset !== undefined && page.offset !== expectedOffset)
     throw new SfError('Data 360 rows response has an unexpected offset.', 'InvalidData360RowsEnvelope');
   if (page.rowLimit !== undefined && page.rowLimit !== requestedLimit)
     throw new SfError('Data 360 rows response has an unexpected rowLimit.', 'InvalidData360RowsEnvelope');
   if (total !== undefined && expectedOffset + rowCount > total)
     throw new SfError('Data 360 rows response exceeds its declared total.', 'InvalidData360RowsEnvelope');
-  if (total !== undefined && expectedOffset + rowCount < total && rowCount !== requestedLimit)
+  if (!initialPage && total !== undefined && expectedOffset + rowCount < total && rowCount !== requestedLimit)
     throw new SfError('Data 360 rows response ended before its declared total.', 'InvalidData360RowsEnvelope');
+}
+
+function normalizeMarketSegmentId(value: unknown): string {
+  if (typeof value !== 'string' || !/^1sg[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?$/u.test(value)) {
+    throw new SfError('MarketSegment ID must be a 15- or 18-character ID with prefix 1sg.', 'InvalidMarketSegmentId');
+  }
+  return value.slice(0, 15);
 }
 
 function requireIdentifier(value: unknown, label: string): string {

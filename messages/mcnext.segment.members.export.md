@@ -6,6 +6,8 @@ Export computed members of a Marketing Cloud Next segment.
 
 Resolves a segment by API name, MarketSegment record ID, or exact display name, then exports its computed members. Basic mode preserves the verified v67 SSOT members endpoint shape. With `--include-details`, the command discovers the segment's latest membership DMO and segment-on DMO, queries Data 360, and writes exactly the 19 Unified Individual fields in service metadata order, one row per membership.
 
+Enriched queries filter the shared membership DMO's `Segment_Id__c` to the resolved MarketSegment ID before joining details or limiting output. Enriched mode applies `--limit` to the initial Query API request and each subsequent row page. It follows the query ID returned in `status.queryId` and offsets through the full SQL result, including results larger than 1,000 rows, subject to the configured item, page, and time bounds.
+
 CSV and JSON outputs are staged beside the destination and replace it only after discovery, querying, paging, formatting, closing, commit, and backup cleanup all succeed. Existing destination bytes are normally restored on failure. If restoration is impossible, the error states the destination status and exact sibling backup path retaining the original. `--fields`, `--filters`, `--order-by`, and nonzero `--offset` are basic-only and are rejected with `--include-details`.
 
 # examples
@@ -76,7 +78,7 @@ Maximum number of pages staged before failing, before destination replacement be
 
 # flags.max-items.summary
 
-Maximum number of rows staged before failing, before destination replacement begins.
+Maximum exported rows. Basic mode stops at this count; enriched mode applies it as the SQL result limit and fails if the returned rows exceed it.
 
 # flags.max-duration-ms.summary
 

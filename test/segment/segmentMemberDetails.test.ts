@@ -28,7 +28,11 @@ const metadata = {
   metadata: [
     {
       name: 'Individual_Unified_SM_123__dlm',
-      fields: [{ name: 'Id__c' }, { name: 'Individual_Id__c', keyQualifier: 'KQ_Membership' }],
+      fields: [
+        { name: 'Id__c' },
+        { name: 'Individual_Id__c', keyQualifier: 'KQ_Membership' },
+        { name: 'Segment_Id__c', type: 'TEXT' },
+      ],
       primaryKeys: ['Id__c'],
       relationships: [
         {
@@ -52,10 +56,12 @@ const metadata = {
 };
 
 const source = {
+  marketSegmentId: '1sgaj000000PveD',
   latestMembershipDmo: 'Individual_Unified_SM_123__dlm',
   segmentOnDmo: 'UnifiedssotIndividualMkt__dlm',
 };
 const liveFixtureSource = {
+  marketSegmentId: '1sgaj000000PveD',
   latestMembershipDmo: 'Membership_Selected__dlm',
   segmentOnDmo: 'UnifiedssotIndividualMkt__dlm',
 };
@@ -203,6 +209,74 @@ describe('segment member detail service', () => {
     expect(error.name).to.equal('InvalidDataSpace');
   });
 
+  for (const marketSegmentId of ['1sgaj000000PveD', '1sgaj000000PveDAAG']) {
+    it(`filters the inner query using case-preserved first15 identity ${marketSegmentId}`, async () => {
+      const { client } = await clientReturning([metadata]);
+      const discovery = await discoverSegmentMemberDetails(client, { ...source, marketSegmentId });
+      expect(discovery.marketSegmentId).to.equal('1sgaj000000PveD');
+      const sql = buildSegmentMemberDetailsSql(discovery, 10);
+      expect(sql).to.contain('WHERE m."Segment_Id__c" = \'1sgaj000000PveD\'');
+      expect(sql.indexOf('WHERE m.')).to.be.lessThan(sql.indexOf(') bounded_members'));
+      expect(sql).not.to.contain('PveDAAG');
+    });
+  }
+
+  for (const marketSegmentId of [
+    undefined,
+    '',
+    '1sgshort',
+    '001aj000000PveD',
+    '1sgaj000000PveDA',
+    "1sgaj000000Pve'",
+    ' 1sgaj000000PveD',
+    '1SGaj000000PveD',
+  ]) {
+    it(`rejects invalid MarketSegment identity ${String(marketSegmentId)}`, async () => {
+      const { client, requests } = await clientReturning([metadata]);
+      const error = await captureError(
+        discoverSegmentMemberDetails(client, { ...source, marketSegmentId: marketSegmentId as string })
+      );
+      expect(error.name).to.equal('InvalidMarketSegmentId');
+      expect(requests).to.have.length(0);
+    });
+  }
+
+  it('accepts live Segment_Id__c STRING storage with TEXT business metadata and retains the filter', async () => {
+    const observed = structuredClone(metadata);
+    const field = observed.metadata[0].fields.find((candidate) => candidate.name === 'Segment_Id__c');
+    Object.assign(field ?? {}, { type: 'STRING', businessType: 'TEXT' });
+    const { client } = await clientReturning([observed]);
+    const discovery = await discoverSegmentMemberDetails(client, source);
+    expect(buildSegmentMemberDetailsSql(discovery, 10)).to.contain('WHERE m."Segment_Id__c" = \'1sgaj000000PveD\'');
+  });
+
+  for (const fieldType of [undefined, 'NUMBER']) {
+    it(`rejects membership filtering field type ${String(fieldType)}`, async () => {
+      const invalid = structuredClone(metadata);
+      const field = invalid.metadata[0].fields.find((candidate) => candidate.name === 'Segment_Id__c');
+      if (fieldType === undefined)
+        invalid.metadata[0].fields.splice(
+          invalid.metadata[0].fields.findIndex((candidate) => candidate.name === 'Segment_Id__c'),
+          1
+        );
+      else if (field) field.type = fieldType;
+      const { client } = await clientReturning([invalid]);
+      const error = await captureError(discoverSegmentMemberDetails(client, source));
+      expect(error.name).to.equal(
+        fieldType === undefined ? 'MissingData360MetadataField' : 'InvalidSegmentMembershipFieldType'
+      );
+    });
+  }
+
+  it('rejects a membership filtering field without type metadata', async () => {
+    const invalid = structuredClone(metadata);
+    delete invalid.metadata[0].fields.find((field) => field.name === 'Segment_Id__c')?.type;
+    const { client } = await clientReturning([invalid]);
+    expect((await captureError(discoverSegmentMemberDetails(client, source))).name).to.equal(
+      'InvalidSegmentMembershipFieldType'
+    );
+  });
+
   it('builds a deterministic LEFT JOIN with details-only stable aliases', async () => {
     const { client } = await clientReturning([metadata]);
     const discovery = await discoverSegmentMemberDetails(client, source, 'Marketing');
@@ -229,6 +303,7 @@ describe('segment member detail service', () => {
       'Marketing',
     ]);
     const submission = JSON.parse(requests[2].body ?? '{}') as { sql: string };
+    expect(submission).to.have.property('rowLimit', 2000);
     expect(submission.sql).to.include('LEFT JOIN');
     expect(submission.sql).to.include('ORDER BY "membership_key_internal"');
     expect(submission.sql).to.match(/LIMIT 1000000$/u);
@@ -264,7 +339,7 @@ describe('segment member detail service', () => {
     const submission = JSON.parse(bounded.requests[2].body ?? '{}') as { sql: string };
     expect(submission.sql).to.match(/LIMIT 500$/u);
     expect(bounded.requests.slice(3).map((request) => request.url)).to.deep.equal([
-      '/services/data/v67.0/ssot/query-sql/query-bounded',
+      '/services/data/v67.0/ssot/query-sql/query-bounded/rows?offset=0&rowLimit=200',
       '/services/data/v67.0/ssot/query-sql/query-bounded/rows?offset=200&rowLimit=200',
     ]);
   });
@@ -329,8 +404,9 @@ describe('segment member detail service', () => {
     { label: 'multiple chunks', change: { chunkCount: 2 } },
     { label: 'incomplete progress', change: { progress: 0.5 } },
   ]) {
-    it(`rejects the live synchronous shape when ${malformed.label}`, async () => {
+    it(`rejects the no-ID synchronous shape when ${malformed.label}`, async () => {
       const live = await loadLiveQueryFixture();
+      delete (live.status as Record<string, unknown>).queryId;
       if ('returnedRows' in malformed.change) live.returnedRows = malformed.change.returnedRows;
       else Object.assign(live.status as Record<string, unknown>, malformed.change);
       const { client } = await clientReturning([metadataForLiveQueryFixture(live), live]);
@@ -340,6 +416,22 @@ describe('segment member detail service', () => {
     });
   }
 
+  it('accepts a genuinely no-ID observed terminal page', async () => {
+    const live = await loadLiveQueryFixture();
+    delete (live.status as Record<string, unknown>).queryId;
+    const { client } = await clientReturning([metadataForLiveQueryFixture(live), live]);
+    const result = await querySegmentMemberDetails(client, source);
+    expect(await collect(result.rows)).to.have.length(1);
+  });
+
+  it('rejects an invalid requested page size before submitting SQL', async () => {
+    const { client, requests } = await clientReturning([metadata]);
+    expect((await captureError(querySegmentMemberDetails(client, source, { rowLimit: 0 }))).name).to.equal(
+      'InvalidData360RowLimit'
+    );
+    expect(requests.some((request) => request.method === 'POST')).to.equal(false);
+  });
+
   it('rejects conflicting top-level and nested completion status values', async () => {
     const live = await loadLiveQueryFixture();
     live.completionStatus = 'Completed';
@@ -348,6 +440,131 @@ describe('segment member detail service', () => {
     expect((await captureError(querySegmentMemberDetails(client, source))).name).to.equal(
       'InvalidData360QueryEnvelope'
     );
+  });
+
+  it('retrieves all 1201 live-shaped rows using the nested query ID and initial total', async () => {
+    const allRows = Array.from({ length: 1201 }, (_, index) => row(1, `membership-${index}`));
+    const { client, requests } = await clientReturning([
+      metadata,
+      {
+        data: allRows.slice(0, 200),
+        metadata: outputMetadata,
+        returnedRows: 200,
+        status: {
+          queryId: 'live-pages',
+          completionStatus: 'ResultsProduced',
+          rowCount: 1201,
+          rowsProcessed: 1201,
+          chunkCount: 1,
+          progress: 1,
+        },
+      },
+      ...Array.from({ length: 6 }, (_, index) => {
+        const data = allRows.slice((index + 1) * 200, (index + 2) * 200);
+        return { data, metadata: outputMetadata, returnedRows: data.length };
+      }),
+    ]);
+    const result = await querySegmentMemberDetails(client, source, { rowLimit: 200 });
+    expect(await collect(result.rows)).to.deep.equal(allRows.map((entry) => entry.slice(0, -2)));
+    expect(JSON.parse(requests[2].body ?? '{}')).to.have.property('rowLimit', 200);
+    expect(requests.slice(3).map((request) => request.url)).to.deep.equal(
+      [200, 400, 600, 800, 1000, 1200].map(
+        (offset) => `/services/data/v67.0/ssot/query-sql/live-pages/rows?offset=${offset}&rowLimit=200`
+      )
+    );
+  });
+
+  it('polls nested nonterminal status even with rows, then preserves the terminal total', async () => {
+    const { client, requests } = await clientReturning([
+      metadata,
+      { data: [], status: { queryId: 'nested-poll', completionStatus: 'Running' } },
+      { status: { queryId: 'nested-poll', completionStatus: 'ResultsProduced', rowCount: 1 } },
+      { data: [row(1)], metadata: outputMetadata, returnedRows: 1 },
+    ]);
+    const result = await querySegmentMemberDetails(client, source, { polling: { intervalMs: 0 } });
+    expect(await collect(result.rows)).to.have.length(1);
+    expect(requests[3].url).to.equal('/services/data/v67.0/ssot/query-sql/nested-poll');
+  });
+
+  for (const data of [[], [row(1)]]) {
+    it(`rejects a continuation with ${data.length} rows before the known total`, async () => {
+      const { client } = await clientReturning([
+        metadata,
+        {
+          data: [row(1)],
+          metadata: outputMetadata,
+          returnedRows: 1,
+          status: { queryId: 'short-page', completionStatus: 'ResultsProduced', rowCount: 5 },
+        },
+        { data, metadata: outputMetadata, returnedRows: data.length },
+      ]);
+      const result = await querySegmentMemberDetails(client, source, { rowLimit: 2 });
+      expect((await captureError(collect(result.rows))).name).to.equal('InvalidData360RowsEnvelope');
+    });
+  }
+
+  for (const response of [
+    { queryId: 'one', status: { queryId: 'two', completionStatus: 'ResultsProduced' } },
+    { queryId: 'one', totalSize: 1, totalCount: 2, metadata: outputMetadata, data: [row(1)] },
+    {
+      totalSize: 2,
+      status: { queryId: 'one', completionStatus: 'ResultsProduced', rowCount: 1 },
+      metadata: outputMetadata,
+      data: [row(1)],
+    },
+  ]) {
+    it('rejects conflicting query IDs or total counts', async () => {
+      const { client } = await clientReturning([metadata, response]);
+      const error = await captureError(
+        (async () => {
+          const result = await querySegmentMemberDetails(client, source);
+          await collect(result.rows);
+        })()
+      );
+      expect(error.name).to.match(/^InvalidData360/u);
+    });
+  }
+
+  for (const completionStatus of ['Failed', 'Cancelled', 'Error']) {
+    it(`rejects nested ${completionStatus} status even when rows are present`, async () => {
+      const { client } = await clientReturning([
+        metadata,
+        {
+          data: [row(1)],
+          metadata: outputMetadata,
+          status: { queryId: 'failed-query', completionStatus, rowCount: 1 },
+        },
+      ]);
+      expect((await captureError(querySegmentMemberDetails(client, source))).name).to.equal('Data360QueryFailed');
+    });
+  }
+
+  it('rejects a nested failure returned by polling', async () => {
+    const { client } = await clientReturning([
+      metadata,
+      { status: { queryId: 'poll-fail', completionStatus: 'Running' } },
+      { data: [], status: { queryId: 'poll-fail', completionStatus: 'Failed' } },
+    ]);
+    expect((await captureError(querySegmentMemberDetails(client, source))).name).to.equal('Data360QueryFailed');
+  });
+
+  it('rejects a changed total or query ID on continuation', async () => {
+    for (const change of [{ totalCount: 3 }, { queryId: 'other-query' }]) {
+      // eslint-disable-next-line no-await-in-loop -- construct each independent malformed continuation variant
+      const { client } = await clientReturning([
+        metadata,
+        {
+          data: [row(1)],
+          metadata: outputMetadata,
+          status: { queryId: 'original-query', completionStatus: 'ResultsProduced', rowCount: 2 },
+        },
+        { data: [row(1)], metadata: outputMetadata, ...change },
+      ]);
+      // eslint-disable-next-line no-await-in-loop -- exercise independent malformed continuation variants
+      const result = await querySegmentMemberDetails(client, source, { rowLimit: 1 });
+      // eslint-disable-next-line no-await-in-loop -- each iterator must reject independently
+      expect((await captureError(collect(result.rows))).name).to.match(/^InvalidData360/u);
+    }
   });
 
   it('polls an asynchronous query then retrieves and paginates rows', async () => {
