@@ -57,7 +57,7 @@ describe('sf-metadata-capability-v1 foundation', () => {
       if (!runtime.available) throw new Error('Missing native capability');
       expect(runtime.declaration).to.deep.equal({
         ...historical,
-        providerContract: { ...historical.providerContract, maxVersion: '0.10.999' },
+        providerContract: { ...historical.providerContract, maxVersion: '0.11.999' },
       });
     }
   });
@@ -187,7 +187,7 @@ describe('sf-metadata-capability-v1 foundation', () => {
         available: true,
         declaration: {
           ...declaration,
-          providerContract: { ...declaration.providerContract, maxVersion: '0.10.999' },
+          providerContract: { ...declaration.providerContract, maxVersion: '0.11.999' },
         },
       });
     }
