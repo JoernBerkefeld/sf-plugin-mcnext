@@ -1,5 +1,6 @@
-import { open, unlink, type FileHandle } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, open, unlink, type FileHandle } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import select from '@inquirer/select';
 import { Messages, Org, SfError } from '@salesforce/core';
 import { Flags, SfCommand } from '@salesforce/sf-plugins-core';
 import { McnClient, PageProgress, PaginationLimits } from '../../../../client/mcnClient.js';
@@ -12,6 +13,7 @@ import {
 import {
   createSegmentMembersRequest,
   resolveSegment,
+  ResolveSegmentOptions,
   SegmentDescriptor,
   SegmentMember,
 } from '../../../../segment/segmentMembers.js';
@@ -20,7 +22,6 @@ Messages.importMessagesDirectoryFromMetaUrl(import.meta.url);
 const messages = Messages.loadMessages('sf-plugin-mcnext', 'mcnext.segment.members.export');
 
 const DEFAULT_PAGE_SIZE = 200;
-const DEFAULT_DATA_SPACE = 'default';
 const targetOrgFlag = Flags.requiredOrg({
   summary: messages.getMessage('flags.target-org.summary'),
 }) as unknown as ReturnType<typeof Flags.string>;
@@ -56,6 +57,7 @@ type ExportOptions = {
   columnDelimiter?: 'BACKQUOTE' | 'CARET' | 'COMMA' | 'PIPE' | 'SEMICOLON' | 'TAB';
   lineEnding?: 'LF' | 'CRLF';
   paginationLimits: PaginationLimits;
+  resolveAmbiguous?: ResolveSegmentOptions['resolveAmbiguous'];
   onSegmentResolved?: (segmentApiName: string) => void;
   onProgress?: (progress: PageProgress) => void;
 };
@@ -91,7 +93,6 @@ export default class SegmentMembersExport extends SfCommand<SegmentMembersExport
       summary: messages.getMessage('flags.include-details.summary'),
     }),
     'data-space': Flags.string({
-      default: DEFAULT_DATA_SPACE,
       summary: messages.getMessage('flags.data-space.summary'),
     }),
     fields: Flags.string({
@@ -141,12 +142,15 @@ export default class SegmentMembersExport extends SfCommand<SegmentMembersExport
     }),
   };
 
+  protected selectSegment = promptAmbiguousSegment;
+
   public async run(): Promise<SegmentMembersExportResult> {
     const { flags } = await this.parse(SegmentMembersExport);
     const resolvedOrg = flags['target-org'] as unknown as { getUsername: () => string };
     const org = await Org.create({ aliasOrUsername: resolvedOrg.getUsername() });
     const client = await McnClient.create(org, flags['api-version']);
 
+    const interactive = Boolean(process.stdin.isTTY) && !this.jsonEnabled();
     const result = await exportSegmentMembers({
       client,
       segment: flags.segment,
@@ -167,6 +171,9 @@ export default class SegmentMembersExport extends SfCommand<SegmentMembersExport
         ...(flags['max-items'] === undefined ? {} : { maxItems: flags['max-items'] }),
         ...(flags['max-duration-ms'] === undefined ? {} : { maxDurationMs: flags['max-duration-ms'] }),
       },
+      resolveAmbiguous: interactive
+        ? (candidates): Promise<SegmentDescriptor> => this.selectSegment(candidates)
+        : undefined,
       onSegmentResolved: (segmentApiName) => this.logToStderr(`Found segment ${segmentApiName}. Starting download.`),
       onProgress: ({ batch, expectedBatches }) =>
         this.logToStderr(`Downloading batch ${batch}${expectedBatches === undefined ? '' : ` of ${expectedBatches}`}`),
@@ -176,22 +183,77 @@ export default class SegmentMembersExport extends SfCommand<SegmentMembersExport
   }
 }
 
+/** Prompt the operator to pick one ambiguous segment candidate. Injectable for tests. */
+export async function promptAmbiguousSegment(candidates: SegmentDescriptor[]): Promise<SegmentDescriptor> {
+  const selected = await select({
+    message: 'Multiple segments match that name. Choose one:',
+    choices: candidates.map((candidate, index) => ({
+      name: formatSegmentChoice(candidate),
+      value: index,
+    })),
+  });
+  return candidates[selected];
+}
+
+function formatSegmentChoice(segment: SegmentDescriptor): string {
+  const display =
+    typeof segment.displayName === 'string' && segment.displayName.trim()
+      ? segment.displayName.trim()
+      : typeof segment.apiName === 'string'
+      ? segment.apiName
+      : 'segment';
+  const space =
+    typeof segment.dataSpace === 'string' && segment.dataSpace.trim() ? segment.dataSpace.trim() : 'unknown data space';
+  const id =
+    typeof segment.marketSegmentId === 'string' && segment.marketSegmentId.trim()
+      ? segment.marketSegmentId.trim()
+      : 'missing Id';
+  return `${display} — data space ${space} (Id ${id})`;
+}
+
+function resolveOptionsFromExport(options: ExportOptions): ResolveSegmentOptions {
+  return {
+    ...(options.dataSpace === undefined ? {} : { dataSpace: options.dataSpace }),
+    ...(options.resolveAmbiguous === undefined ? {} : { resolveAmbiguous: options.resolveAmbiguous }),
+  };
+}
+
+function resolveEnrichedDataSpace(explicit: string | undefined, segment: SegmentDescriptor): string {
+  const selected = resolveSegmentDataSpace(explicit, segment);
+  if (!selected) {
+    throw new SfError(
+      'Enriched export requires a data space. Pass --data-space or use a segment whose detail reports dataSpace.',
+      'MissingDataSpace'
+    );
+  }
+  return selected;
+}
+
+/** Prefer explicit --data-space, otherwise the resolved segment's dataSpace after disambiguation. */
+function resolveSegmentDataSpace(explicit: string | undefined, segment: SegmentDescriptor): string | undefined {
+  const fromFlag = explicit?.trim() ? explicit.trim() : undefined;
+  const fromSegment =
+    typeof segment.dataSpace === 'string' && segment.dataSpace.trim() ? segment.dataSpace.trim() : undefined;
+  return fromFlag ?? fromSegment;
+}
+
 /** Export basic endpoint rows or enriched details through one atomic destination transaction. */
 export async function exportSegmentMembers(options: ExportOptions): Promise<SegmentMembersExportResult> {
   const includeDetails = options.includeDetails ?? false;
-  const dataSpace = options.dataSpace ?? DEFAULT_DATA_SPACE;
   const columnHeaders = options.columnHeaders ?? 'label';
   const delimiter = delimiterCharacter(options.columnDelimiter);
   const lineEnding = options.lineEnding === 'CRLF' ? '\r\n' : '\n';
+  const resolveOptions = resolveOptionsFromExport(options);
 
   if (includeDetails) {
     rejectBasicOnlyOptions(options);
-    const segment = await resolveSegment(options.client, options.segment);
+    const segment = await resolveSegment(options.client, options.segment, resolveOptions);
     const segmentApiName = segment.apiName as string;
     options.onSegmentResolved?.(segmentApiName);
     const source = extractDetailSource(segment);
+    const requestedDataSpace = resolveEnrichedDataSpace(options.dataSpace, segment);
     const details = await querySegmentMemberDetails(options.client, source, {
-      dataSpace,
+      dataSpace: requestedDataSpace,
       rowLimit: options.limit,
       paginationLimits: options.paginationLimits,
       onProgress: options.onProgress,
@@ -199,7 +261,8 @@ export async function exportSegmentMembers(options: ExportOptions): Promise<Segm
     const destination = await resolveOutputFile(
       options.outputFile,
       segment.displayName ?? segmentApiName,
-      options.resultFormat
+      options.resultFormat,
+      resolveSegmentDataSpace(undefined, segment)
     );
     const outputFile = destination.path;
     const rowsWritten = await writeReservedOutput(destination, async ({ handle }) =>
@@ -210,7 +273,7 @@ export async function exportSegmentMembers(options: ExportOptions): Promise<Segm
       outputFile,
       resultFormat: options.resultFormat,
       includeDetails: true,
-      dataSpace,
+      dataSpace: details.dataSpace,
       rowsWritten,
       columnHeaders,
       complete: true,
@@ -225,20 +288,22 @@ export async function exportSegmentMembers(options: ExportOptions): Promise<Segm
     limit: options.limit,
     offset: options.offset,
   };
-  const generatedSegment =
-    options.outputFile === undefined ? await resolveSegment(options.client, options.segment) : undefined;
+  const generatedSegment = await resolveSegment(options.client, options.segment, resolveOptions);
   const resolved = await createSegmentMembersRequest(
     options.client,
     options.segment,
     requestOptions,
-    generatedSegment?.apiName
+    generatedSegment.apiName,
+    resolveOptions
   );
   const segmentApiName = resolved.segmentApiName;
   const { request, pageSize } = resolved;
+  const dataSpace = resolveSegmentDataSpace(options.dataSpace, generatedSegment);
   const destination = await resolveOutputFile(
     options.outputFile,
-    generatedSegment?.displayName ?? segmentApiName,
-    options.resultFormat
+    generatedSegment.displayName ?? segmentApiName,
+    options.resultFormat,
+    resolveSegmentDataSpace(undefined, generatedSegment)
   );
   const outputFile = destination.path;
   options.onSegmentResolved?.(segmentApiName);
@@ -256,7 +321,7 @@ export async function exportSegmentMembers(options: ExportOptions): Promise<Segm
     outputFile,
     resultFormat: options.resultFormat,
     includeDetails: false,
-    dataSpace,
+    dataSpace: dataSpace ?? '',
     rowsWritten,
     columnHeaders: 'api-name',
     complete: true,
@@ -405,14 +470,48 @@ export function sanitizeFilename(value: string): string {
   return /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/iu.test(safe) ? `segment-${safe}` : safe;
 }
 
+/** Sanitize a resolved data-space name for use as a single path segment under ./data/. */
+export function sanitizeDataSpaceDirectory(value: string | undefined): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new SfError(
+      'Default output path requires a resolved data space. Pass --data-space or use a segment that reports dataSpace.',
+      'MissingDataSpace'
+    );
+  }
+  const trimmed = value.trim();
+  if (trimmed === '.' || trimmed === '..' || trimmed.includes('..') || /[/\\]/u.test(trimmed)) {
+    throw new SfError(
+      `Data space "${trimmed}" cannot be used as an output directory name.`,
+      'InvalidDataSpaceDirectory'
+    );
+  }
+  const sanitized = [...trimmed]
+    .map((character) => (character.charCodeAt(0) < 32 || /[<>:"|?*]/u.test(character) ? '-' : character))
+    .join('')
+    .replace(/\s+/gu, '-')
+    .replace(/-+/gu, '-')
+    .replace(/^[. ]+|[. ]+$/gu, '');
+  if (!sanitized || sanitized === '.' || sanitized === '..' || sanitized.includes('..') || /[/\\]/u.test(sanitized)) {
+    throw new SfError(
+      `Data space "${trimmed}" cannot be used as an output directory name.`,
+      'InvalidDataSpaceDirectory'
+    );
+  }
+  return /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/iu.test(sanitized) ? `dataspace-${sanitized}` : sanitized;
+}
+
 type ResolvedOutputFile = { path: string; reservation?: FileHandle };
 
 async function resolveOutputFile(
   requested: string | undefined,
   segmentName: string,
-  format: 'csv' | 'json'
+  format: 'csv' | 'json',
+  dataSpace?: string
 ): Promise<ResolvedOutputFile> {
   if (requested !== undefined) return { path: resolve(requested) };
+  const spaceDir = sanitizeDataSpaceDirectory(dataSpace);
+  const outputDirectory = resolve('data', spaceDir);
+  await mkdir(outputDirectory, { recursive: true });
   const now = new Date();
   const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
     now.getDate()
@@ -421,7 +520,7 @@ async function resolveOutputFile(
   ).padStart(2, '0')}`;
   const stem = `${sanitizeFilename(segmentName)}-${timestamp}`;
   for (let suffix = 1; ; suffix++) {
-    const candidate = resolve(`${stem}${suffix === 1 ? '' : `_${suffix}`}.${format}`);
+    const candidate = join(outputDirectory, `${stem}${suffix === 1 ? '' : `_${suffix}`}.${format}`);
     try {
       // eslint-disable-next-line no-await-in-loop -- each exclusive reservation depends on the prior collision
       const reservation = await open(candidate, 'wx');

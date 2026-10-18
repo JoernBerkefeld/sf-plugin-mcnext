@@ -4,7 +4,6 @@ import { McnClient, PageProgress, PaginationLimits } from '../client/mcnClient.j
 const METADATA_PATH = '/ssot/metadata';
 const QUERY_PATH = '/ssot/query-sql';
 const CORE_QUERY_PATH = '/query';
-const DEFAULT_DATA_SPACE = 'default';
 const DEFAULT_ROW_LIMIT = 2000;
 const DEFAULT_MAX_ITEMS = 1_000_000;
 const IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/u;
@@ -53,6 +52,7 @@ export type SegmentMemberDetailQueryOptions = {
 
 /** Metadata plus an incremental iterator of details-only rows. */
 export type SegmentMemberDetailResult = {
+  dataSpace: string;
   columns: SegmentMemberDetailColumn[];
   rows: AsyncIterable<readonly unknown[]>;
 };
@@ -119,12 +119,14 @@ export function quoteData360Identifier(identifier: string): string {
 }
 
 /** Validate an accessible DataSpace record before relying on Data 360 headers. */
-export async function validateDataSpace(client: McnClient, dataSpace = DEFAULT_DATA_SPACE): Promise<string> {
+export async function validateDataSpace(client: McnClient, dataSpace: string): Promise<string> {
   const normalizedSpace = requireNonempty(dataSpace, 'Data space');
   const response = await client.request<unknown>({
     path: CORE_QUERY_PATH,
     query: {
-      q: `SELECT Id, Name FROM DataSpace WHERE Name = ${escapeSoqlLiteral(normalizedSpace)} LIMIT 2`,
+      q: `SELECT Id, DataSpaceApiName FROM DataSpace WHERE DataSpaceApiName = ${escapeSoqlLiteral(
+        normalizedSpace
+      )} LIMIT 2`,
     },
   });
   const envelope = asRecord(response, 'DataSpace query response');
@@ -133,7 +135,11 @@ export async function validateDataSpace(client: McnClient, dataSpace = DEFAULT_D
   }
   const matches = envelope.records.filter((record) => {
     const candidate = asRecord(record, 'DataSpace query record');
-    return candidate.Name === normalizedSpace && typeof candidate.Id === 'string' && candidate.Id.startsWith('0vh');
+    return (
+      candidate.DataSpaceApiName === normalizedSpace &&
+      typeof candidate.Id === 'string' &&
+      candidate.Id.startsWith('0vh')
+    );
   });
   if (matches.length !== 1 || envelope.totalSize !== 1 || envelope.done !== true) {
     throw new SfError(
@@ -141,14 +147,15 @@ export async function validateDataSpace(client: McnClient, dataSpace = DEFAULT_D
       'InvalidDataSpace'
     );
   }
-  return normalizedSpace;
+  const validated = asRecord(matches[0], 'DataSpace query record').DataSpaceApiName;
+  return requireNonempty(validated, 'DataSpaceApiName');
 }
 
-/** Discover and validate the two DMOs, their one-to-one relationship, and all 19 detail fields. */
+/** Discover and validate the two DMOs, their relationship contract, and detail fields. */
 export async function discoverSegmentMemberDetails(
   client: McnClient,
   source: SegmentMemberDetailSource,
-  dataSpace = DEFAULT_DATA_SPACE
+  dataSpace = 'default'
 ): Promise<SegmentMemberDetailDiscovery> {
   const normalizedSpace = requireNonempty(dataSpace, 'Data space');
   const marketSegmentId = normalizeMarketSegmentId(source.marketSegmentId);
@@ -159,18 +166,6 @@ export async function discoverSegmentMemberDetails(
     headers: { 'Data-Space': normalizedSpace },
   });
   const { membership, detail } = selectMetadataEntities(response, membershipName, detailName);
-  if (detail.name !== 'UnifiedssotIndividualMkt__dlm') {
-    throw new SfError(
-      `Segment-on DMO ${detail.name} is unsupported; expected UnifiedssotIndividualMkt__dlm.`,
-      'UnsupportedSegmentOnDmo'
-    );
-  }
-  if (detail.fields.length !== 19) {
-    throw new SfError(
-      `Segment-on DMO ${detail.name} exposes ${detail.fields.length} fields; exactly 19 are required.`,
-      'UnexpectedSegmentDetailFieldCount'
-    );
-  }
 
   const relationships = membership.relationships.filter(
     (relationship) => relationship.fromEntity === membership.name && relationship.toEntity === detail.name
@@ -246,6 +241,9 @@ export async function querySegmentMemberDetails(
   source: SegmentMemberDetailSource,
   options: SegmentMemberDetailQueryOptions = {}
 ): Promise<SegmentMemberDetailResult> {
+  if (typeof options.dataSpace !== 'string' || !options.dataSpace.trim()) {
+    throw new SfError('Enriched query requires a non-empty data space.', 'MissingDataSpace');
+  }
   const dataSpace = await validateDataSpace(client, options.dataSpace);
   const discovery = await discoverSegmentMemberDetails(client, source, dataSpace);
   const rowLimit = options.rowLimit ?? DEFAULT_ROW_LIMIT;
@@ -267,7 +265,7 @@ export async function querySegmentMemberDetails(
     INTERNAL_MATCH_COUNT_COLUMN,
   ];
   const rows = iterateQueryRows(client, ready, discovery.dataSpace, expectedNames, options);
-  return { columns: discovery.columns, rows };
+  return { dataSpace: discovery.dataSpace, columns: discovery.columns, rows };
 }
 
 async function awaitReadyQuery(

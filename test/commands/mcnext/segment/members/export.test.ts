@@ -10,6 +10,7 @@ import SegmentMembersExport, {
   exportSegmentMembers,
   normalizeFieldValue,
   resolveColumnHeaders,
+  sanitizeDataSpaceDirectory,
   sanitizeFilename,
 } from '../../../../../src/commands/mcnext/segment/members/export.js';
 import { resolveSegmentApiName } from '../../../../../src/segment/segmentMembers.js';
@@ -64,6 +65,7 @@ describe('mcnext segment members export', () => {
   let run: RunOwnedTemp;
   let directory: string;
   let siblingSentinel: string;
+  const stdinTtyDescriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
 
   beforeEach(async () => {
     run = await createRunOwnedTemp('mcnext-segment-members');
@@ -73,6 +75,8 @@ describe('mcnext segment members export', () => {
   });
 
   afterEach(async () => {
+    if (stdinTtyDescriptor) Object.defineProperty(process.stdin, 'isTTY', stdinTtyDescriptor);
+    else Reflect.deleteProperty(process.stdin, 'isTTY');
     $$.restore();
     await removeRunOwnedPath(run, directory);
     const childError = await stat(directory).catch((error: NodeJS.ErrnoException) => error);
@@ -106,6 +110,22 @@ describe('mcnext segment members export', () => {
     expect(sanitizeFilename('Annual: Promo / West?')).to.equal('Annual-Promo-West');
     expect(sanitizeFilename('CON')).to.equal('segment-CON');
     expect(sanitizeFilename('   ... ')).to.equal('segment-members');
+  });
+
+  it('does not silently default the data-space flag to default', () => {
+    expect(SegmentMembersExport.flags['data-space'].default).to.equal(undefined);
+  });
+
+  it('sanitizes data-space directory names and rejects empty or path-like values', () => {
+    expect(sanitizeDataSpaceDirectory('Eurex')).to.equal('Eurex');
+    expect(sanitizeDataSpaceDirectory('My Space')).to.equal('My-Space');
+    expect(sanitizeDataSpaceDirectory('CON')).to.equal('dataspace-CON');
+    expect(() => sanitizeDataSpaceDirectory(undefined)).to.throw('resolved data space');
+    expect(() => sanitizeDataSpaceDirectory('')).to.throw('resolved data space');
+    expect(() => sanitizeDataSpaceDirectory('..')).to.throw('cannot be used');
+    expect(() => sanitizeDataSpaceDirectory('a/b')).to.throw('cannot be used');
+    expect(() => sanitizeDataSpaceDirectory('a\\b')).to.throw('cannot be used');
+    expect(() => sanitizeDataSpaceDirectory('foo..bar')).to.throw('cannot be used');
   });
 
   it('resolves an explicit target org through the standard Salesforce CLI org flag', async () => {
@@ -176,6 +196,56 @@ describe('mcnext segment members export', () => {
     expect(requestPages.calledOnce).to.equal(true);
     expect(requestPages.firstCall.args[2] as PaginationLimits).to.deep.equal({});
   });
+
+  for (const [tty, json, shouldPrompt] of [
+    [true, false, true],
+    [false, false, false],
+    [true, true, false],
+    [false, true, false],
+  ]) {
+    it(`gates command picker with TTY=${tty} and json=${json}`, async () => {
+      const command = Object.create(SegmentMembersExport.prototype) as SegmentMembersExport;
+      const segments = ['Eurex', 'OtherBu'].map((dataSpace, index) => ({
+        apiName: `Segment_${index}`,
+        displayName: 'Shared Name',
+        marketSegmentId: `1sg00000000000${index + 1}`,
+        dataSpace,
+      }));
+      const client = clientWith({ segments, pages: [[{ id: 'one' }]] });
+      const picker = $$.SANDBOX.stub().resolves(segments[1]);
+      Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: tty });
+      $$.SANDBOX.stub(McnClient, 'create').resolves(client);
+      const org = { getUsername: () => 'test@example.com' } as Org;
+      $$.SANDBOX.stub(Org, 'create').resolves(org);
+      Object.assign(command, {
+        selectSegment: picker,
+        jsonEnabled: () => json,
+        logToStderr: $$.SANDBOX.stub(),
+        parse: $$.SANDBOX.stub().resolves({
+          flags: {
+            'target-org': org,
+            segment: 'Shared Name',
+            'output-file': join(directory, 'picked.json'),
+            'result-format': 'json',
+            limit: 200,
+          },
+        }),
+      });
+      if (shouldPrompt) {
+        const result = await command.run();
+        expect(result.segmentApiName).to.equal('Segment_1');
+        expect(picker.calledOnceWithExactly(segments)).to.equal(true);
+        expect(JSON.parse(await readFile(result.outputFile, 'utf8'))).to.deep.equal([{ id: 'one' }]);
+      } else {
+        const error = await captureError(command.run());
+        expect(error.name).to.equal('AmbiguousSegmentError');
+        expect(error.message).to.include('Eurex').and.include('OtherBu');
+        expect(error.message).to.include(segments[0].marketSegmentId).and.include(segments[1].marketSegmentId);
+        expect(picker.called).to.equal(false);
+        expect(await readdir(directory)).to.deep.equal([]);
+      }
+    });
+  }
 
   it('reports resolved, known and unknown batch progress plus final confirmation on stderr', async () => {
     const command = Object.create(SegmentMembersExport.prototype) as SegmentMembersExport;
@@ -256,8 +326,18 @@ describe('mcnext segment members export', () => {
   it('rejects missing and ambiguous segment selections', async () => {
     const client = clientWith({
       segments: [
-        { apiName: 'First', displayName: 'Duplicate' },
-        { apiName: 'Second', displayName: 'Duplicate' },
+        {
+          apiName: 'First',
+          displayName: 'Duplicate',
+          dataSpace: 'Eurex',
+          marketSegmentId: '1sg000000000001',
+        },
+        {
+          apiName: 'Second',
+          displayName: 'Duplicate',
+          dataSpace: 'OtherBu',
+          marketSegmentId: '1sg000000000002',
+        },
       ],
     });
 
@@ -276,29 +356,55 @@ describe('mcnext segment members export', () => {
     } catch (error) {
       ambiguous = error as Error;
     }
+    expect(ambiguous?.name).to.equal('AmbiguousSegmentError');
     expect(ambiguous?.message).to.contain('ambiguous');
+    expect(ambiguous?.message).to.contain('1sg000000000001');
+    expect(ambiguous?.message).to.contain('data space Eurex');
+    expect(ambiguous?.message).not.to.contain('Use its API name');
   });
 
-  it('keeps basic ID/display-name resolution independent of the detail endpoint', async () => {
+  it('selects one ambiguous display name when --data-space is provided', async () => {
+    const client = clientWith({
+      segments: [
+        {
+          apiName: 'First',
+          displayName: 'Duplicate',
+          dataSpace: 'Eurex',
+          marketSegmentId: '1sg000000000001',
+        },
+        {
+          apiName: 'Second',
+          displayName: 'Duplicate',
+          dataSpace: 'OtherBu',
+          marketSegmentId: '1sg000000000002',
+        },
+      ],
+    });
+
+    expect(await resolveSegmentApiName(client, 'Duplicate', { dataSpace: 'Eurex' })).to.equal('First');
+  });
+
+  it('resolves basic ID/display-name selection through the list then a detail envelope', async () => {
     for (const selection of ['1sg000000000001AAA', 'Annual Promo']) {
       /* eslint-disable no-await-in-loop -- each selection verifies an independent filesystem transaction */
       const outputFile = join(directory, `${selection.startsWith('1sg') ? 'id' : 'name'}.json`);
       const requests: string[] = [];
+      const segment = {
+        apiName: 'Annual_Promo',
+        displayName: 'Annual Promo',
+        marketSegmentId: '1sg000000000001AAA',
+        dataSpace: 'default',
+      };
       const client = {
         request: async (request: RequestOptions) => {
           requests.push(request.path);
           if (request.path === `/ssot/segments/${encodeURIComponent(selection)}`) {
             throw Object.assign(new Error('direct selection not found'), { name: 'ITEM_NOT_FOUND' });
           }
-          throw new Error('segment detail request must not occur after a list match');
+          if (request.path === '/ssot/segments/Annual_Promo') return { segments: [segment] };
+          throw new Error(`Unexpected request: ${request.path}`);
         },
-        requestAll: async () => [
-          {
-            apiName: 'Annual_Promo',
-            displayName: 'Annual Promo',
-            marketSegmentId: '1sg000000000001AAA',
-          },
-        ],
+        requestAll: async () => [segment],
         async *requestPages() {
           yield [{ id: 'opaque-1' }];
         },
@@ -315,7 +421,10 @@ describe('mcnext segment members export', () => {
       });
 
       expect(JSON.parse(await readFile(outputFile, 'utf8'))).to.deep.equal([{ id: 'opaque-1' }]);
-      expect(requests).to.deep.equal([`/ssot/segments/${encodeURIComponent(selection)}`]);
+      expect(requests).to.deep.equal([
+        `/ssot/segments/${encodeURIComponent(selection)}`,
+        '/ssot/segments/Annual_Promo',
+      ]);
       /* eslint-enable no-await-in-loop */
     }
   });
@@ -363,19 +472,19 @@ describe('mcnext segment members export', () => {
       outputFile,
       resultFormat: 'json',
       includeDetails: false,
-      dataSpace: 'default',
+      dataSpace: '',
       rowsWritten: 2,
       columnHeaders: 'api-name',
       complete: true,
     });
   });
 
-  it('generates an absolute sanitized collision-safe filename when output-file is omitted', async () => {
+  it('generates an absolute sanitized collision-safe filename under ./data/<data-space>/ when output-file is omitted', async () => {
     const previousCwd = process.cwd();
     process.chdir(directory);
     try {
       const client = clientWith({
-        segments: [{ apiName: 'Annual_Promo', displayName: 'Annual: Promo?' }],
+        segments: [{ apiName: 'Annual_Promo', displayName: 'Annual: Promo?', dataSpace: 'Eurex' }],
         pages: [[]],
       });
       const first = await exportSegmentMembers({
@@ -394,9 +503,36 @@ describe('mcnext segment members export', () => {
       });
 
       expect(isAbsolute(first.outputFile)).to.equal(true);
-      expect(first.outputFile).to.match(/Annual-Promo-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.json$/u);
-      expect(second.outputFile).to.match(/_2\.json$/u);
+      expect(first.outputFile).to.match(
+        /[/\\]data[/\\]Eurex[/\\]Annual-Promo-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.json$/u
+      );
+      expect(second.outputFile).to.match(/[/\\]data[/\\]Eurex[/\\].*_2\.json$/u);
       expect(second.outputFile).not.to.equal(first.outputFile);
+      expect(await readdir(join(directory, 'data', 'Eurex'))).to.have.length(2);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('fails closed when generating a default path without a resolved data space', async () => {
+    const previousCwd = process.cwd();
+    process.chdir(directory);
+    try {
+      const client = clientWith({
+        segments: [{ apiName: 'Annual_Promo', displayName: 'Annual Promo' }],
+        pages: [[{ id: 'one' }]],
+      });
+      const error = await captureError(
+        exportSegmentMembers({
+          client,
+          segment: 'Annual_Promo',
+          resultFormat: 'json',
+          limit: 200,
+          paginationLimits: {},
+        })
+      );
+      expect(error.name).to.equal('MissingDataSpace');
+      expect(await readdir(directory)).to.deep.equal([]);
     } finally {
       process.chdir(previousCwd);
     }
@@ -407,10 +543,13 @@ describe('mcnext segment members export', () => {
     process.chdir(directory);
     try {
       let filesDuringWrite: string[] = [];
+      const outputDir = join(directory, 'data', 'default');
       const client = {
-        request: async () => ({ segments: [{ apiName: 'Annual_Promo', displayName: 'Annual Promo' }] }),
+        request: async () => ({
+          segments: [{ apiName: 'Annual_Promo', displayName: 'Annual Promo', dataSpace: 'default' }],
+        }),
         async *requestPages() {
-          filesDuringWrite = await readdir(directory);
+          filesDuringWrite = await readdir(outputDir);
           yield [{ id: 'opaque-1' }];
         },
       } as unknown as McnClient;
@@ -424,11 +563,12 @@ describe('mcnext segment members export', () => {
       });
 
       const destinationName = result.outputFile.split(/[\\/]/u).at(-1) as string;
+      expect(result.outputFile).to.include(join('data', 'default'));
       expect(filesDuringWrite).to.include(destinationName);
       expect(
         filesDuringWrite.some((name) => name.startsWith(`.${destinationName}.`) && name.endsWith('.stage'))
       ).to.equal(true);
-      expect(await readdir(directory)).to.deep.equal([destinationName]);
+      expect(await readdir(outputDir)).to.deep.equal([destinationName]);
       expect(JSON.parse(await readFile(result.outputFile, 'utf8'))).to.deep.equal([{ id: 'opaque-1' }]);
     } finally {
       process.chdir(previousCwd);
@@ -440,10 +580,13 @@ describe('mcnext segment members export', () => {
     process.chdir(directory);
     try {
       let filesDuringWrite: string[] = [];
+      const outputDir = join(directory, 'data', 'default');
       const client = {
-        request: async () => ({ segments: [{ apiName: 'Annual_Promo', displayName: 'Annual Promo' }] }),
+        request: async () => ({
+          segments: [{ apiName: 'Annual_Promo', displayName: 'Annual Promo', dataSpace: 'default' }],
+        }),
         async *requestPages() {
-          filesDuringWrite = await readdir(directory);
+          filesDuringWrite = await readdir(outputDir);
           yield [{ id: 'opaque-1' }];
           throw new Error('generated page failed');
         },
@@ -462,7 +605,8 @@ describe('mcnext segment members export', () => {
       expect(error.message).to.contain('generated page failed');
       expect(filesDuringWrite.some((name) => name.endsWith('.json'))).to.equal(true);
       expect(filesDuringWrite.some((name) => name.endsWith('.stage'))).to.equal(true);
-      expect(await readdir(directory)).to.deep.equal([]);
+      expect(await readdir(outputDir)).to.deep.equal([]);
+      expect(await readdir(directory)).to.deep.equal(['data']);
     } finally {
       process.chdir(previousCwd);
     }
@@ -485,6 +629,7 @@ describe('mcnext segment members export', () => {
                 {
                   apiName: 'Annual_Promo',
                   displayName: 'Annual Promo',
+                  dataSpace: 'default',
                   marketSegmentId: '1sgaj000000PveDAAG',
                   segmentMembershipDmo: { latestTable: 'Individual_Unified_SM_1__dlm' },
                   segmentOnApiName: 'UnifiedssotIndividualMkt__dlm',
@@ -492,7 +637,7 @@ describe('mcnext segment members export', () => {
               ],
             };
           if (request.path === '/query')
-            return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+            return { records: [{ Id: '0vh000000000001AAA', DataSpaceApiName: 'default' }], totalSize: 1, done: true };
           if (request.path === '/ssot/metadata')
             return {
               metadata: [
@@ -542,11 +687,13 @@ describe('mcnext segment members export', () => {
           segment: 'Annual_Promo',
           resultFormat: 'json',
           includeDetails: true,
+          dataSpace: 'default',
           limit: 200,
           paginationLimits: {},
         })
       );
-      expect(await readdir(directory)).to.deep.equal([]);
+      expect(await readdir(join(directory, 'data', 'default'))).to.deep.equal([]);
+      expect(await readdir(directory)).to.deep.equal(['data']);
     } finally {
       process.chdir(previousCwd);
     }
@@ -655,7 +802,7 @@ describe('mcnext segment members export', () => {
             };
           }
           if (request.path === '/query') {
-            return { records: [{ Id: '0vh000000000001AAA', Name: 'Marketing' }], totalSize: 1, done: true };
+            return { records: [{ Id: '0vh000000000001AAA', DataSpaceApiName: 'Marketing' }], totalSize: 1, done: true };
           }
           if (request.path === '/ssot/metadata') {
             return {
@@ -781,7 +928,7 @@ describe('mcnext segment members export', () => {
         const descriptor = descriptors.find((candidate) => request.path === `/ssot/segments/${candidate.apiName}`);
         if (descriptor) return { segments: [descriptor] };
         if (request.path === '/query')
-          return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+          return { records: [{ Id: '0vh000000000001AAA', DataSpaceApiName: 'default' }], totalSize: 1, done: true };
         if (request.path === '/ssot/metadata')
           return {
             metadata: [
@@ -832,6 +979,7 @@ describe('mcnext segment members export', () => {
         outputFile,
         resultFormat: 'json',
         includeDetails: true,
+        dataSpace: 'default',
         limit: 200,
         paginationLimits: {},
       });
@@ -887,7 +1035,7 @@ describe('mcnext segment members export', () => {
               };
             }
             if (request.path === '/query') {
-              return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+              return { records: [{ Id: '0vh000000000001AAA', DataSpaceApiName: 'default' }], totalSize: 1, done: true };
             }
             if (request.path === '/ssot/metadata') {
               return {
@@ -949,6 +1097,7 @@ describe('mcnext segment members export', () => {
           outputFile,
           resultFormat: 'csv',
           includeDetails: true,
+          dataSpace: 'default',
           limit: 500,
           paginationLimits: {},
         });
@@ -1003,7 +1152,7 @@ describe('mcnext segment members export', () => {
               ],
             };
           if (request.path === '/query')
-            return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+            return { records: [{ Id: '0vh000000000001AAA', DataSpaceApiName: 'default' }], totalSize: 1, done: true };
           if (request.path === '/ssot/metadata')
             return {
               metadata: [
@@ -1055,6 +1204,7 @@ describe('mcnext segment members export', () => {
         resultFormat,
         columnHeaders: 'api-name',
         includeDetails: true,
+        dataSpace: 'default',
         limit: 200,
         paginationLimits: {},
       });
@@ -1133,7 +1283,7 @@ describe('mcnext segment members export', () => {
           };
         }
         if (request.path === '/query') {
-          return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+          return { records: [{ Id: '0vh000000000001AAA', DataSpaceApiName: 'default' }], totalSize: 1, done: true };
         }
         if (request.path === '/ssot/metadata') {
           return {
@@ -1257,7 +1407,7 @@ describe('mcnext segment members export', () => {
               ],
             };
           if (request.path === '/query')
-            return { records: [{ Id: '0vh000000000001AAA', Name: 'default' }], totalSize: 1, done: true };
+            return { records: [{ Id: '0vh000000000001AAA', DataSpaceApiName: 'default' }], totalSize: 1, done: true };
           throw new Error('Must not query metadata or memberships without a valid identity');
         },
       } as unknown as McnClient;
@@ -1268,6 +1418,7 @@ describe('mcnext segment members export', () => {
           outputFile,
           resultFormat: 'json',
           includeDetails: true,
+          dataSpace: 'default',
           limit: 200,
           paginationLimits: {},
         })
@@ -1304,5 +1455,305 @@ describe('mcnext segment members export', () => {
     expect(caught?.name).to.equal('InvalidSegmentMemberDetailSource');
     expect(await readFile(outputFile, 'utf8')).to.equal('original');
     expect(await readdir(directory)).to.deep.equal(['details.json']);
+  });
+
+  it('auto-resolves enriched data space from segment.dataSpace when the flag is omitted', async () => {
+    const columns = [
+      { name: 'ssot__Id__c', displayName: 'Id', type: 'Text', keyQualifier: 'Individual' },
+      { name: 'Extra__c', displayName: 'Extra', type: 'Text' },
+    ];
+    const headers: string[] = [];
+    const client = {
+      request: async (request: RequestOptions) => {
+        if (request.headers?.['Data-Space']) headers.push(request.headers['Data-Space']);
+        if (request.path === '/ssot/segments/Annual_Promo') {
+          return {
+            segments: [
+              {
+                apiName: 'Annual_Promo',
+                dataSpace: 'Eurex',
+                marketSegmentId: '1sgaj000000PveDAAG',
+                segmentMembershipDmo: { latestTable: 'Individual_Unified_SM_1__dlm' },
+                segmentOnApiName: 'UnifiedIndividual__dlm',
+              },
+            ],
+          };
+        }
+        if (request.path === '/query') {
+          return { records: [{ Id: '0vh000000000001AAA', DataSpaceApiName: 'Eurex' }], totalSize: 1, done: true };
+        }
+        if (request.path === '/ssot/metadata') {
+          return {
+            metadata: [
+              {
+                name: 'Individual_Unified_SM_1__dlm',
+                fields: [
+                  { name: 'Id__c' },
+                  { name: 'Individual_Id__c', keyQualifier: 'Membership' },
+                  { name: 'Segment_Id__c', type: 'TEXT' },
+                ],
+                primaryKeys: ['Id__c'],
+                relationships: [
+                  {
+                    fromEntity: 'Individual_Unified_SM_1__dlm',
+                    toEntity: 'UnifiedIndividual__dlm',
+                    fromField: 'Individual_Id__c',
+                    toField: 'ssot__Id__c',
+                    fromKeyQualifier: 'Membership',
+                    toKeyQualifier: 'Individual',
+                    cardinality: 'many-to-one',
+                  },
+                ],
+              },
+              {
+                name: 'UnifiedIndividual__dlm',
+                fields: columns,
+                primaryKeys: ['ssot__Id__c'],
+                relationships: [],
+              },
+            ],
+          };
+        }
+        return {
+          queryId: 'query-eurex',
+          metadata: [
+            ...columns.map((column) => ({ name: column.name })),
+            { name: 'membership_key_internal' },
+            { name: 'detail_match_count_internal' },
+          ],
+          data: [['individual-1', 'extra', 'membership-1', 1]],
+          totalSize: 1,
+        };
+      },
+    } as unknown as McnClient;
+    const outputFile = join(directory, 'eurex-details.json');
+    const result = await exportSegmentMembers({
+      client,
+      segment: 'Annual_Promo',
+      outputFile,
+      resultFormat: 'json',
+      includeDetails: true,
+      limit: 200,
+      paginationLimits: {},
+    });
+
+    expect(result.dataSpace).to.equal('Eurex');
+    expect(result.enriched?.objectApiName).to.equal('UnifiedIndividual__dlm');
+    expect(result.enriched?.columns).to.have.length(2);
+    expect(headers).to.deep.equal(['Eurex', 'Eurex']);
+    expect(JSON.parse(await readFile(outputFile, 'utf8'))).to.deep.equal([{ Id: 'individual-1', Extra: 'extra' }]);
+  });
+
+  it('passes --data-space into basic export segment resolution', async () => {
+    const pageRequests: PageOptions[] = [];
+    const client = clientWith({
+      segments: [
+        {
+          apiName: 'First',
+          displayName: 'Shared Name',
+          dataSpace: 'Eurex',
+          marketSegmentId: '1sg000000000001',
+        },
+        {
+          apiName: 'Second',
+          displayName: 'Shared Name',
+          dataSpace: 'OtherBu',
+          marketSegmentId: '1sg000000000002',
+        },
+      ],
+      pages: [[{ id: 'member-1' }]],
+      pageRequests,
+    });
+    const outputFile = join(directory, 'basic-disambiguated.json');
+    const result = await exportSegmentMembers({
+      client,
+      segment: 'Shared Name',
+      outputFile,
+      resultFormat: 'json',
+      dataSpace: 'Eurex',
+      limit: 200,
+      paginationLimits: {},
+    });
+
+    expect(result.segmentApiName).to.equal('First');
+    expect(result.dataSpace).to.equal('Eurex');
+    expect(pageRequests[0]?.path).to.equal('/ssot/segments/First/members');
+  });
+
+  it('uses an injected ambiguous picker for interactive selection', async () => {
+    const pageRequests: PageOptions[] = [];
+    const client = clientWith({
+      segments: [
+        {
+          apiName: 'First',
+          displayName: 'Shared Name',
+          dataSpace: 'Eurex',
+          marketSegmentId: '1sg000000000001',
+        },
+        {
+          apiName: 'Second',
+          displayName: 'Shared Name',
+          dataSpace: 'OtherBu',
+          marketSegmentId: '1sg000000000002',
+        },
+      ],
+      pages: [[{ id: 'member-2' }]],
+      pageRequests,
+    });
+    const outputFile = join(directory, 'basic-picked.json');
+    const result = await exportSegmentMembers({
+      client,
+      segment: 'Shared Name',
+      outputFile,
+      resultFormat: 'json',
+      limit: 200,
+      paginationLimits: {},
+      resolveAmbiguous: async (candidates) => candidates[1],
+    });
+
+    expect(result.segmentApiName).to.equal('Second');
+    expect(result.dataSpace).to.equal('OtherBu');
+    expect(pageRequests[0]?.path).to.equal('/ssot/segments/Second/members');
+  });
+
+  it('throws a non-interactive ambiguous error listing data spaces and MarketSegment Ids', async () => {
+    const client = clientWith({
+      segments: [
+        {
+          apiName: 'First',
+          displayName: 'Shared Name',
+          dataSpace: 'Eurex',
+          marketSegmentId: '1sg000000000001',
+        },
+        {
+          apiName: 'Second',
+          displayName: 'Shared Name',
+          dataSpace: 'OtherBu',
+          marketSegmentId: '1sg000000000002',
+        },
+      ],
+      pages: [[{ id: 'unused' }]],
+    });
+    const error = await captureError(
+      exportSegmentMembers({
+        client,
+        segment: 'Shared Name',
+        outputFile: join(directory, 'ambiguous.json'),
+        resultFormat: 'json',
+        limit: 200,
+        paginationLimits: {},
+      })
+    );
+    expect(error.name).to.equal('AmbiguousSegmentError');
+    expect(error.message).to.contain('data space Eurex');
+    expect(error.message).to.contain('data space OtherBu');
+    expect(error.message).to.contain('1sg000000000001');
+    expect(error.message).to.contain('1sg000000000002');
+    expect(error.message).to.contain('--segment');
+    expect(error.message).to.contain('--data-space');
+    expect(error.message).not.to.contain('Use its API name');
+  });
+
+  it('keeps explicit --output-file outside ./data/<data-space>/', async () => {
+    const previousCwd = process.cwd();
+    process.chdir(directory);
+    try {
+      const client = clientWith({
+        segments: [{ apiName: 'Annual_Promo', dataSpace: 'Eurex' }],
+        pages: [[{ id: 'one' }]],
+      });
+      const result = await exportSegmentMembers({
+        client,
+        segment: 'Annual_Promo',
+        outputFile: 'explicit-out.json',
+        resultFormat: 'json',
+        limit: 200,
+        paginationLimits: {},
+      });
+      expect(result.outputFile).to.equal(join(directory, 'explicit-out.json'));
+      expect(result.outputFile).not.to.match(/[/\\]data[/\\]/u);
+      expect(await readdir(directory)).to.deep.equal(['explicit-out.json']);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('uses resolved segment dataSpace, not an explicit header override, for the default directory', async () => {
+    const previousCwd = process.cwd();
+    process.chdir(directory);
+    try {
+      const result = await exportSegmentMembers({
+        client: clientWith({ segments: [{ apiName: 'Selected', dataSpace: 'ActualSpace' }], pages: [[]] }),
+        segment: 'Selected',
+        resultFormat: 'json',
+        dataSpace: 'HeaderOverride',
+        limit: 200,
+        paginationLimits: {},
+      });
+      expect(result.outputFile).to.include(join(directory, 'data', 'ActualSpace'));
+      expect(await readdir(join(directory, 'data'))).to.deep.equal(['ActualSpace']);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('does not invent a default directory from the flag when the resolved segment omits dataSpace', async () => {
+    const previousCwd = process.cwd();
+    process.chdir(directory);
+    try {
+      const error = await captureError(
+        exportSegmentMembers({
+          client: clientWith({ segments: [{ apiName: 'Selected' }] }),
+          segment: 'Selected',
+          resultFormat: 'json',
+          dataSpace: 'FlagOnly',
+          limit: 200,
+          paginationLimits: {},
+        })
+      );
+      expect(error.name).to.equal('MissingDataSpace');
+      expect(await readdir(directory)).to.deep.equal([]);
+    } finally {
+      process.chdir(previousCwd);
+    }
+  });
+
+  it('writes the default path under ./data/<flag-data-space>/ after disambiguation', async () => {
+    const previousCwd = process.cwd();
+    process.chdir(directory);
+    try {
+      const client = clientWith({
+        segments: [
+          {
+            apiName: 'First',
+            displayName: 'Shared Name',
+            dataSpace: 'Eurex',
+            marketSegmentId: '1sg000000000001',
+          },
+          {
+            apiName: 'Second',
+            displayName: 'Shared Name',
+            dataSpace: 'OtherBu',
+            marketSegmentId: '1sg000000000002',
+          },
+        ],
+        pages: [[{ id: 'one' }]],
+      });
+      const result = await exportSegmentMembers({
+        client,
+        segment: 'Shared Name',
+        resultFormat: 'json',
+        dataSpace: 'Eurex',
+        limit: 200,
+        paginationLimits: {},
+      });
+      expect(result.outputFile).to.match(
+        /[/\\]data[/\\]Eurex[/\\]Shared-Name-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.json$/u
+      );
+      expect(result.dataSpace).to.equal('Eurex');
+      expect(await readdir(join(directory, 'data', 'Eurex'))).to.have.length(1);
+    } finally {
+      process.chdir(previousCwd);
+    }
   });
 });

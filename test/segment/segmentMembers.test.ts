@@ -3,7 +3,9 @@ import { expect } from 'chai';
 import { McnClient } from '../../src/client/mcnClient.js';
 import {
   correlateCampaignSegmentDefinitions,
+  enrichSegmentDataSpaces,
   getSegmentMembers,
+  resolveSegment,
   resolveSegmentApiName,
 } from '../../src/segment/segmentMembers.js';
 
@@ -476,22 +478,30 @@ describe('segment-member service', () => {
   });
 
   it('resolves an exact 18-character MarketSegment ID through the segment list', async () => {
-    const segment = { apiName: 'Annual_Promo', marketSegmentId: '1sg000000000001AAA' };
-    const { client } = await clientReturning([notFound(), listEnvelope([segment])]);
+    const segment = {
+      apiName: 'Annual_Promo',
+      marketSegmentId: '1sg000000000001AAA',
+      dataSpace: 'default',
+    };
+    const { client } = await clientReturning([notFound(), listEnvelope([segment]), { segments: [segment] }]);
 
     expect(await resolveSegmentApiName(client, segment.marketSegmentId)).to.equal('Annual_Promo');
   });
 
   it('resolves an exact 15-character MarketSegment ID through the segment list', async () => {
-    const segment = { apiName: 'Annual_Promo', marketSegmentId: '1sg000000000001' };
-    const { client } = await clientReturning([notFound(), listEnvelope([segment])]);
+    const segment = {
+      apiName: 'Annual_Promo',
+      marketSegmentId: '1sg000000000001',
+      dataSpace: 'default',
+    };
+    const { client } = await clientReturning([notFound(), listEnvelope([segment]), { segments: [segment] }]);
 
     expect(await resolveSegmentApiName(client, segment.marketSegmentId)).to.equal('Annual_Promo');
   });
 
   it('resolves an exact case-sensitive display name through the segment list', async () => {
-    const segment = { apiName: 'Annual_Promo', displayName: 'Annual Promo' };
-    const exact = await clientReturning([notFound(), listEnvelope([segment])]);
+    const segment = { apiName: 'Annual_Promo', displayName: 'Annual Promo', dataSpace: 'default' };
+    const exact = await clientReturning([notFound(), listEnvelope([segment]), { segments: [segment] }]);
     const wrongCase = await clientReturning([notFound(), listEnvelope([segment])]);
 
     expect(await resolveSegmentApiName(exact.client, segment.displayName)).to.equal('Annual_Promo');
@@ -500,18 +510,222 @@ describe('segment-member service', () => {
     );
   });
 
-  it('rejects ambiguous exact display-name matches', async () => {
+  it('rejects ambiguous exact display-name matches without favoring API name', async () => {
     const { client } = await clientReturning([
       notFound(),
       listEnvelope([
-        { apiName: 'First', displayName: 'Duplicate' },
-        { apiName: 'Second', displayName: 'Duplicate' },
+        {
+          apiName: 'First',
+          displayName: 'Duplicate',
+          dataSpace: 'Eurex',
+          marketSegmentId: '1sg000000000001',
+        },
+        {
+          apiName: 'Second',
+          displayName: 'Duplicate',
+          dataSpace: 'OtherBu',
+          marketSegmentId: '1sg000000000002',
+        },
       ]),
     ]);
 
     const error = await captureError(resolveSegmentApiName(client, 'Duplicate'));
     expect(error.name).to.equal('AmbiguousSegmentError');
     expect(error.message).to.contain('ambiguous');
+    expect(error.message).to.contain('data space Eurex');
+    expect(error.message).to.contain('1sg000000000001');
+    expect(error.message).to.contain('--segment');
+    expect(error.message).to.contain('--data-space');
+    expect(error.message).not.to.match(/^Segment selection .* is ambiguous\. Use its API name\./u);
+  });
+
+  it('filters ambiguous display names with --data-space', async () => {
+    const eurex = {
+      apiName: 'First',
+      displayName: 'Duplicate',
+      dataSpace: 'Eurex',
+      marketSegmentId: '1sg000000000001',
+    };
+    const other = {
+      apiName: 'Second',
+      displayName: 'Duplicate',
+      dataSpace: 'OtherBu',
+      marketSegmentId: '1sg000000000002',
+    };
+    const { client } = await clientReturning([notFound(), listEnvelope([eurex, other]), { segments: [eurex] }]);
+
+    expect(await resolveSegmentApiName(client, 'Duplicate', { dataSpace: 'Eurex' })).to.equal('First');
+  });
+
+  it('errors when --data-space matches none of the ambiguous display-name candidates', async () => {
+    const { client } = await clientReturning([
+      notFound(),
+      listEnvelope([
+        {
+          apiName: 'First',
+          displayName: 'Duplicate',
+          dataSpace: 'Eurex',
+          marketSegmentId: '1sg000000000001',
+        },
+        {
+          apiName: 'Second',
+          displayName: 'Duplicate',
+          dataSpace: 'OtherBu',
+          marketSegmentId: '1sg000000000002',
+        },
+      ]),
+    ]);
+
+    const error = await captureError(resolveSegmentApiName(client, 'Duplicate', { dataSpace: 'Missing' }));
+    expect(error.name).to.equal('AmbiguousSegmentError');
+    expect(error.message).to.contain('Missing');
+    expect(error.message).to.contain('Eurex');
+    expect(error.message).to.contain('OtherBu');
+  });
+
+  it('uses an injected ambiguous resolver when multiple candidates remain', async () => {
+    const eurex = {
+      apiName: 'First',
+      displayName: 'Duplicate',
+      dataSpace: 'Eurex',
+      marketSegmentId: '1sg000000000001',
+    };
+    const other = {
+      apiName: 'Second',
+      displayName: 'Duplicate',
+      dataSpace: 'OtherBu',
+      marketSegmentId: '1sg000000000002',
+    };
+    const { client } = await clientReturning([notFound(), listEnvelope([eurex, other]), { segments: [other] }]);
+
+    expect(
+      await resolveSegmentApiName(client, 'Duplicate', {
+        resolveAmbiguous: async (candidates) => candidates[1],
+      })
+    ).to.equal('Second');
+  });
+
+  it('enriches missing list dataSpace from showSegment before disambiguating', async () => {
+    const listRows = [
+      { apiName: 'First', displayName: 'Duplicate', marketSegmentId: '1sg000000000001' },
+      { apiName: 'Second', displayName: 'Duplicate', marketSegmentId: '1sg000000000002' },
+    ];
+    const selectedDetail = { ...listRows[0], dataSpace: 'Eurex', segmentOnApiName: 'Individual__dlm' };
+    const { client, urls } = await clientReturning([
+      notFound(),
+      listEnvelope(listRows),
+      { segments: [selectedDetail] },
+      { segments: [{ ...listRows[1], dataSpace: 'OtherBu' }] },
+    ]);
+
+    const segment = await resolveSegment(client, 'Duplicate', { dataSpace: 'Eurex' });
+    expect(segment).to.deep.equal(selectedDetail);
+    for (const apiName of ['First', 'Second']) {
+      expect(urls.filter((url) => url.endsWith(`/segments/${apiName}`))).to.have.lengthOf(1);
+    }
+    expect(urls).to.have.lengthOf(4);
+  });
+
+  for (const conflict of [{ apiName: 'Wrong_Api' }, { marketSegmentId: '1sg000000000002' }]) {
+    it(`rejects cached detail with conflicting ${Object.keys(conflict)[0]}`, async () => {
+      const selected = {
+        apiName: 'First',
+        displayName: 'Selected',
+        marketSegmentId: '1sg000000000001',
+      };
+      const { client, urls } = await clientReturning([
+        notFound(),
+        listEnvelope([selected]),
+        { segments: [{ ...selected, ...conflict, dataSpace: 'Eurex' }] },
+      ]);
+
+      const error = await captureError(resolveSegment(client, 'Selected', { dataSpace: 'Eurex' }));
+      expect(error.name).to.equal('InvalidSegmentDetailResponse');
+      expect(error.message).to.include('identities do not match');
+      expect(urls.filter((url) => url.endsWith('/segments/First'))).to.have.lengthOf(1);
+      expect(urls).to.have.lengthOf(3);
+    });
+  }
+
+  it('lists MarketSegment Ids when --data-space still leaves multiple matches', async () => {
+    const { client } = await clientReturning([
+      notFound(),
+      listEnvelope([
+        {
+          apiName: 'First',
+          displayName: 'Duplicate',
+          dataSpace: 'Eurex',
+          marketSegmentId: '1sg000000000001',
+        },
+        {
+          apiName: 'Second',
+          displayName: 'Duplicate',
+          dataSpace: 'Eurex',
+          marketSegmentId: '1sg000000000002',
+        },
+      ]),
+    ]);
+
+    let prompted = false;
+    const error = await captureError(
+      resolveSegmentApiName(client, 'Duplicate', {
+        dataSpace: 'Eurex',
+        resolveAmbiguous: async (candidates) => {
+          prompted = true;
+          return candidates[0];
+        },
+      })
+    );
+    expect(prompted).to.equal(false);
+    expect(error.name).to.equal('AmbiguousSegmentError');
+    expect(error.message).to.contain('1sg000000000001');
+    expect(error.message).to.contain('1sg000000000002');
+    expect(error.message).to.contain('data space Eurex');
+    expect(error.message).to.contain('--segment');
+    expect(error.message).not.to.contain('Use its API name');
+  });
+
+  it('rejects API-name-only detail belonging to another MarketSegment Id', async () => {
+    const selected = { apiName: 'Shared_Api', marketSegmentId: '1sg000000000001', dataSpace: 'Eurex' };
+    const other = { ...selected, marketSegmentId: '1sg000000000002' };
+    const { client } = await clientReturning([notFound(), listEnvelope([selected, other]), { segments: [other] }]);
+    const error = await captureError(resolveSegment(client, selected.marketSegmentId));
+    expect(error.name).to.equal('InvalidSegmentDetailResponse');
+    expect(error.message).to.include('identities do not match');
+  });
+
+  it('falls back to Id-from-URL guidance when same apiName omits dataSpace', async () => {
+    const shared = {
+      apiName: 'Shared_Api',
+      displayName: 'Duplicate',
+      marketSegmentId: '1sg000000000001',
+    };
+    const twin = {
+      apiName: 'Shared_Api',
+      displayName: 'Duplicate',
+      marketSegmentId: '1sg000000000002',
+    };
+    // API-name-only detail belongs to one row, not both duplicate identities.
+    const detailWithoutSpace = { segments: [{ ...shared, dataSpace: 'Eurex' }] };
+    const enrichClient = await clientReturning([detailWithoutSpace]);
+    const enriched = await enrichSegmentDataSpaces(enrichClient.client, [shared, twin]);
+    expect(enriched.every((row) => row.dataSpace === undefined)).to.equal(true);
+
+    const { client } = await clientReturning([notFound(), listEnvelope([shared, twin]), detailWithoutSpace]);
+    let prompted = false;
+    const error = await captureError(
+      resolveSegmentApiName(client, 'Duplicate', {
+        resolveAmbiguous: async (candidates) => {
+          prompted = true;
+          return candidates[0];
+        },
+      })
+    );
+    expect(prompted).to.equal(false);
+    expect(error.name).to.equal('AmbiguousSegmentError');
+    expect(error.message).to.contain('unknown data space');
+    expect(error.message).to.contain('1sg000000000001');
+    expect(error.message).to.contain('Id from the browser URL');
   });
 
   for (const [label, response] of [

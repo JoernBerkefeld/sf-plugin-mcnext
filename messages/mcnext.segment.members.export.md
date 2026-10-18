@@ -4,9 +4,13 @@ Export computed members of a Marketing Cloud Next segment.
 
 # description
 
-Resolves a segment by API name, MarketSegment record ID, or exact display name, then exports its computed members. Basic mode preserves the verified v67 SSOT members endpoint shape. With `--include-details`, the command discovers the segment's latest membership DMO and segment-on DMO, queries Data 360, and writes exactly the 19 Unified Individual fields in service metadata order, one row per membership.
+Resolves a segment by API name, MarketSegment record ID, or exact display name, then exports its computed members. Basic mode preserves the verified v67 SSOT members endpoint shape. With `--include-details`, the command discovers the segment's latest membership DMO and segment-on DMO, queries Data 360, and writes the segment-on DMO fields in service metadata order, one row per membership.
 
-Enriched queries filter the shared membership DMO's `Segment_Id__c` to the resolved MarketSegment ID before joining details or limiting output. Enriched mode applies `--limit` to the initial Query API request and each subsequent row page. It follows the query ID returned in `status.queryId` and offsets through the full SQL result, including results larger than 1,000 rows, subject to the configured item, page, and time bounds.
+When the same display name exists in more than one data space, pass `--data-space` or the MarketSegment Id from the browser URL. In an interactive terminal (not `--json`), the command can prompt you to pick among matches when `--data-space` is omitted. If multiple candidates still match an explicit data space, the command fails with their Ids instead of prompting. Duplicate API names with unavailable data spaces require the Id from the browser URL.
+
+Enriched mode resolves the Data 360 data space from `--data-space` when provided, otherwise from the segment's `dataSpace`, and fails closed if neither is available. Enriched queries filter the shared membership DMO's `Segment_Id__c` to the resolved MarketSegment ID before joining details or limiting output. Enriched mode applies `--limit` to the initial Query API request and each subsequent row page. It follows the query ID returned in `status.queryId` and offsets through the full SQL result, including results larger than 1,000 rows, subject to the configured item, page, and time bounds.
+
+When `--output-file` is omitted, the command writes a collision-safe `<segment-name>-<timestamp>.csv|json` file under `./data/<data-space>/`, using the resolved segment data space after disambiguation (failing closed if that space is missing or unsafe as a directory name). Explicit `--output-file` paths are unchanged.
 
 CSV and JSON outputs are staged beside the destination and replace it only after discovery, querying, paging, formatting, closing, commit, and backup cleanup all succeed. Existing destination bytes are normally restored on failure. If restoration is impossible, the error states the destination status and exact sibling backup path retaining the original. `--fields`, `--filters`, `--order-by`, and nonzero `--offset` are basic-only and are rejected with `--include-details`.
 
@@ -16,7 +20,7 @@ CSV and JSON outputs are staged beside the destination and replace it only after
 
   <%= config.bin %> <%= command.id %> --segment My_Published_Segment --output-file members.csv
 
-- Export 19-field Unified Individual details as JSON from a named data space:
+- Export enriched Unified Individual details as JSON; data space can be inferred from the segment when `--data-space` is omitted:
 
   <%= config.bin %> <%= command.id %> --target-org my-org --segment My_Published_Segment --output-file member-details.json --result-format json --include-details --data-space Marketing
 
@@ -34,7 +38,7 @@ Segment API name, MarketSegment record ID, or exact segment display name.
 
 # flags.output-file.summary
 
-Optional destination file for exported member rows. When omitted, a collision-safe absolute filename is generated from the segment name and local timestamp. Existing explicit destination bytes are normally restored on failure; exceptional restoration failure reports the exact retained backup path.
+Optional destination file for exported member rows. When omitted, writes `./data/<data-space>/<segment-name>-<timestamp>.csv|json` using the resolved segment data space. Existing explicit destination bytes are normally restored on failure; exceptional restoration failure reports the exact retained backup path.
 
 # flags.result-format.summary
 
@@ -46,11 +50,11 @@ Use field labels or API names as enriched CSV and JSON keys. Labels are the defa
 
 # flags.include-details.summary
 
-Query Data 360 and export the details-only 19-field Unified Individual contract. Default: false.
+Query Data 360 and export details-only fields from the segment-on DMO discovered for the segment. Default: false.
 
 # flags.data-space.summary
 
-Data 360 data space used by enriched metadata and Query API requests. Default: default.
+Data 360 data space used to disambiguate segment selection and, for enriched exports, as the Data-Space header. When omitted for `--include-details`, the segment's dataSpace is used.
 
 # flags.fields.summary
 

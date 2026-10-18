@@ -393,8 +393,16 @@ export type SegmentDescriptor = Record<string, unknown> & {
   apiName?: string;
   displayName?: string;
   marketSegmentId?: string;
+  dataSpace?: string;
   segmentMembershipDmo?: unknown;
   segmentOnApiName?: unknown;
+};
+
+/** Optional filters and hooks for segment selection resolution. */
+export type ResolveSegmentOptions = {
+  dataSpace?: string;
+  /** When more than one candidate remains, select one (interactive adapters inject this). */
+  resolveAmbiguous?: (candidates: SegmentDescriptor[]) => Promise<SegmentDescriptor>;
 };
 
 /** One member row returned by the SSOT segment-members endpoint. */
@@ -421,9 +429,10 @@ export async function createSegmentMembersRequest(
   client: McnClient,
   segment: string,
   options: SegmentMembersOptions = {},
-  resolvedSegmentApiName?: string
+  resolvedSegmentApiName?: string,
+  resolveOptions: ResolveSegmentOptions = {}
 ): Promise<{ segmentApiName: string; request: RequestOptions; pageSize: number }> {
-  const segmentApiName = resolvedSegmentApiName ?? (await resolveSegmentApiName(client, segment));
+  const segmentApiName = resolvedSegmentApiName ?? (await resolveSegmentApiName(client, segment, resolveOptions));
   const pageSize = options.limit ?? DEFAULT_PAGE_SIZE;
   return {
     segmentApiName,
@@ -476,7 +485,11 @@ export async function showSegment(client: McnClient, apiName: string): Promise<S
 }
 
 /** Resolve an API name directly, or through an exact MarketSegment ID or display-name match, and return its detail envelope. */
-export async function resolveSegment(client: McnClient, selection: string): Promise<SegmentDescriptor> {
+export async function resolveSegment(
+  client: McnClient,
+  selection: string,
+  options: ResolveSegmentOptions = {}
+): Promise<SegmentDescriptor> {
   let directError: unknown;
   try {
     return await showSegment(client, selection);
@@ -492,34 +505,148 @@ export async function resolveSegment(client: McnClient, selection: string): Prom
   const matches = segments.filter(
     (segment) => segment.marketSegmentId === selection || segment.displayName === selection
   );
-  if (matches.length === 1 && matches[0].apiName) return showSegment(client, matches[0].apiName);
-  if (matches.length > 1) {
-    throw new SfError(`Segment selection "${selection}" is ambiguous. Use its API name.`, 'AmbiguousSegmentError');
+  if (matches.length === 0) throw directError;
+
+  const detailsByApiName = new Map<string, SegmentDescriptor>();
+  const enriched = await enrichSegmentDataSpaces(client, matches, detailsByApiName);
+  const selected = await disambiguateSegmentMatches(selection, enriched, options);
+  if (!selected.apiName) {
+    throw new SfError(`Segment selection "${selection}" resolved without an API name.`, 'InvalidSegmentDetailResponse');
   }
-  throw directError;
+  const detail = detailsByApiName.get(selected.apiName.trim()) ?? (await showSegment(client, selected.apiName));
+  if (
+    ['apiName', 'marketSegmentId', 'dataSpace'].some(
+      (key) => selected[key] !== undefined && detail[key] !== undefined && selected[key] !== detail[key]
+    )
+  ) {
+    throw new SfError('Selected segment list and detail identities do not match.', 'InvalidSegmentDetailResponse');
+  }
+  return {
+    ...detail,
+    ...(typeof selected.dataSpace === 'string' && detail.dataSpace === undefined
+      ? { dataSpace: selected.dataSpace }
+      : {}),
+  };
 }
 
 /** Resolve a segment selection to its canonical API name without requiring a second detail request. */
-export async function resolveSegmentApiName(client: McnClient, selection: string): Promise<string> {
-  let directError: unknown;
-  try {
-    return (await showSegment(client, selection)).apiName as string;
-  } catch (error) {
-    if ((error as Error).name !== 'ITEM_NOT_FOUND') throw error;
-    directError = error;
+export async function resolveSegmentApiName(
+  client: McnClient,
+  selection: string,
+  options: ResolveSegmentOptions = {}
+): Promise<string> {
+  const segment = await resolveSegment(client, selection, options);
+  if (typeof segment.apiName !== 'string' || !segment.apiName.trim()) {
+    throw new SfError(
+      'Segment detail response must contain exactly one segment with a non-empty apiName.',
+      'InvalidSegmentDetailResponse'
+    );
+  }
+  return segment.apiName;
+}
+
+/** Attach dataSpace from list rows or one showSegment call per distinct API name. */
+export async function enrichSegmentDataSpaces(
+  client: McnClient,
+  candidates: SegmentDescriptor[],
+  detailsByApiName = new Map<string, SegmentDescriptor>()
+): Promise<SegmentDescriptor[]> {
+  const result: SegmentDescriptor[] = [];
+  for (const candidate of candidates) {
+    if (typeof candidate.dataSpace === 'string' && candidate.dataSpace.trim()) {
+      result.push({ ...candidate, dataSpace: candidate.dataSpace.trim() });
+      continue;
+    }
+    const apiName = typeof candidate.apiName === 'string' ? candidate.apiName.trim() : '';
+    if (!apiName || candidates.filter((row) => row.apiName === candidate.apiName).length > 1) {
+      result.push({ ...candidate });
+      continue;
+    }
+    let detail = detailsByApiName.get(apiName);
+    if (!detail) {
+      // eslint-disable-next-line no-await-in-loop -- one detail fetch per distinct API name
+      detail = await showSegment(client, apiName);
+      detailsByApiName.set(apiName, detail);
+    }
+    const dataSpace =
+      typeof detail.dataSpace === 'string' && detail.dataSpace.trim() ? detail.dataSpace.trim() : undefined;
+    result.push(dataSpace === undefined ? { ...candidate } : { ...candidate, dataSpace });
+  }
+  return result;
+}
+
+async function disambiguateSegmentMatches(
+  selection: string,
+  matches: SegmentDescriptor[],
+  options: ResolveSegmentOptions
+): Promise<SegmentDescriptor> {
+  const candidates = matches;
+  const requestedSpace =
+    typeof options.dataSpace === 'string' && options.dataSpace.trim() ? options.dataSpace.trim() : undefined;
+
+  if (requestedSpace !== undefined) {
+    const inSpace = candidates.filter((segment) => segment.dataSpace === requestedSpace);
+    if (inSpace.length === 1) return inSpace[0];
+    if (inSpace.length === 0) {
+      const spaces = uniqueDataSpaces(candidates);
+      throw new SfError(
+        [
+          `No segment matching "${selection}" was found in data space ${requestedSpace}.`,
+          spaces.length
+            ? `Matching data spaces: ${spaces.join(', ')}.`
+            : 'Matching candidates did not report a data space; re-run with --segment <Id from the browser URL>.',
+        ].join(' '),
+        'AmbiguousSegmentError'
+      );
+    }
+    throw new SfError(formatAmbiguousSegmentMessage(selection, inSpace), 'AmbiguousSegmentError');
   }
 
-  const segments = await listSegments(client);
-  const exactApiName = segments.find((segment) => segment.apiName === selection)?.apiName;
-  if (exactApiName) return exactApiName;
-  const matches = segments.filter(
-    (segment) => segment.marketSegmentId === selection || segment.displayName === selection
+  if (candidates.length === 1) return candidates[0];
+
+  const unresolvedSharedApiName = candidates.some(
+    (candidate) => !candidate.dataSpace && candidates.filter((row) => row.apiName === candidate.apiName).length > 1
   );
-  if (matches.length === 1 && matches[0].apiName) return matches[0].apiName;
-  if (matches.length > 1) {
-    throw new SfError(`Segment selection "${selection}" is ambiguous. Use its API name.`, 'AmbiguousSegmentError');
+  if (options.resolveAmbiguous && !unresolvedSharedApiName) {
+    return options.resolveAmbiguous(candidates);
   }
-  throw directError;
+
+  throw new SfError(formatAmbiguousSegmentMessage(selection, candidates), 'AmbiguousSegmentError');
+}
+
+function formatAmbiguousSegmentMessage(selection: string, candidates: SegmentDescriptor[]): string {
+  const lines = candidates.map((segment) => {
+    const space =
+      typeof segment.dataSpace === 'string' && segment.dataSpace.trim()
+        ? segment.dataSpace.trim()
+        : '(unknown data space)';
+    const id =
+      typeof segment.marketSegmentId === 'string' && segment.marketSegmentId.trim()
+        ? segment.marketSegmentId.trim()
+        : '(missing MarketSegment Id)';
+    const display =
+      typeof segment.displayName === 'string' && segment.displayName.trim() ? segment.displayName.trim() : selection;
+    const api =
+      typeof segment.apiName === 'string' && segment.apiName.trim() ? ` (API name ${segment.apiName.trim()})` : '';
+    return `- data space ${space}, MarketSegment Id ${id}, display name "${display}"${api}`;
+  });
+  const missingSpaces = candidates.some(
+    (segment) => typeof segment.dataSpace !== 'string' || !segment.dataSpace.trim()
+  );
+  const guidance = missingSpaces
+    ? 'Re-run with --segment <Id from the browser URL> to identify the segment whose data space is unknown.'
+    : 'Re-run with --segment <Id from the browser URL> or --data-space <name>.';
+  return [`Segment selection "${selection}" is ambiguous:`, ...lines, guidance].join('\n');
+}
+
+function uniqueDataSpaces(candidates: SegmentDescriptor[]): string[] {
+  return [
+    ...new Set(
+      candidates
+        .map((segment) => (typeof segment.dataSpace === 'string' ? segment.dataSpace.trim() : ''))
+        .filter((space) => space.length > 0)
+    ),
+  ].sort();
 }
 
 /** Fetch every bounded page from the verified segment-members data envelope. */

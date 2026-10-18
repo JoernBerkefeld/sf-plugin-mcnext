@@ -102,6 +102,12 @@ const outputNames = [
 ];
 const outputMetadata = outputNames.map((name) => ({ name }));
 
+function dataSpaceFromQueryUrl(url: string): string {
+  const decoded = decodeURIComponent(url).replaceAll('+', ' ');
+  const match = /DataSpaceApiName\s*=\s*'([^']+)'/u.exec(decoded);
+  return match?.[1] ?? 'default';
+}
+
 async function clientReturning(responses: unknown[]): Promise<{ client: McnClient; requests: RequestArgs[] }> {
   const requests: RequestArgs[] = [];
   let call = 0;
@@ -111,8 +117,12 @@ async function clientReturning(responses: unknown[]): Promise<{ client: McnClien
     request: async (args: RequestArgs) => {
       requests.push(args);
       if (args.url.includes('/query?q=')) {
-        const requestedName = args.url.includes('Marketing') ? 'Marketing' : 'default';
-        return { records: [{ Id: '0vh000000000001AAA', Name: requestedName }], totalSize: 1, done: true };
+        const requestedName = dataSpaceFromQueryUrl(args.url);
+        return {
+          records: [{ Id: '0vh000000000001AAA', DataSpaceApiName: requestedName }],
+          totalSize: 1,
+          done: true,
+        };
       }
       const response = responses[call++];
       if (response instanceof Error) throw response;
@@ -192,11 +202,11 @@ describe('segment member detail service', () => {
     expect(() => quoteData360Identifier('unsafe; DROP TABLE x')).to.throw('invalid SQL identifier');
   });
 
-  it('validates data spaces through the authoritative core object', async () => {
+  it('validates data spaces through DataSpaceApiName on the authoritative core object', async () => {
     const valid = await clientReturning([]);
     expect(await validateDataSpace(valid.client, 'default')).to.equal('default');
     expect(valid.requests[0].url).to.include(
-      '/query?q=SELECT+Id%2C+Name+FROM+DataSpace+WHERE+Name+%3D+%27default%27+LIMIT+2'
+      '/query?q=SELECT+Id%2C+DataSpaceApiName+FROM+DataSpace+WHERE+DataSpaceApiName+%3D+%27default%27+LIMIT+2'
     );
 
     const missingConnection = {
@@ -207,6 +217,80 @@ describe('segment member detail service', () => {
     const missingOrg = { getConnection: () => missingConnection } as unknown as Org;
     const error = await captureError(validateDataSpace(await McnClient.create(missingOrg), 'missing'));
     expect(error.name).to.equal('InvalidDataSpace');
+  });
+
+  it('requires an explicit resolved space before enriched metadata or SQL requests', async () => {
+    const { client, requests } = await clientReturning([]);
+    const error = await captureError(querySegmentMemberDetails(client, source));
+    expect(error.name).to.equal('MissingDataSpace');
+    expect(requests).to.deep.equal([]);
+  });
+
+  it('does not accept a matching DataSpace display Name in place of DataSpaceApiName', async () => {
+    const connection = {
+      instanceUrl: 'https://example.my.salesforce.com',
+      retrieveMaxApiVersion: async () => '67.0',
+      request: async () => ({
+        records: [{ Id: '0vh000000000001AAA', Name: 'Eurex', DataSpaceApiName: 'Other' }],
+        totalSize: 1,
+        done: true,
+      }),
+    } as unknown as Connection;
+    const org = { getConnection: () => connection } as unknown as Org;
+    const error = await captureError(validateDataSpace(await McnClient.create(org), 'Eurex'));
+    expect(error.name).to.equal('InvalidDataSpace');
+  });
+
+  it('discovers UnifiedIndividual__dlm with a non-19 field count when the relationship contract holds', async () => {
+    const fields = Array.from({ length: 7 }, (_, index) => ({
+      name: index === 0 ? 'ssot__Id__c' : `ExtraField${index}__c`,
+      displayName: `Field ${index}`,
+      type: 'Text',
+      ...(index === 0 ? { keyQualifier: 'KQ_Individual' } : {}),
+    }));
+    const response = {
+      metadata: [
+        {
+          name: 'Individual_Unified_SM_123__dlm',
+          fields: [
+            { name: 'Id__c' },
+            { name: 'Individual_Id__c', keyQualifier: 'KQ_Membership' },
+            { name: 'Segment_Id__c', type: 'TEXT' },
+          ],
+          primaryKeys: ['Id__c'],
+          relationships: [
+            {
+              fromEntity: 'Individual_Unified_SM_123__dlm',
+              toEntity: 'UnifiedIndividual__dlm',
+              fromField: 'Individual_Id__c',
+              toField: 'ssot__Id__c',
+              fromKeyQualifier: 'KQ_Membership',
+              toKeyQualifier: 'KQ_Individual',
+              cardinality: 'many-to-one',
+            },
+          ],
+        },
+        {
+          name: 'UnifiedIndividual__dlm',
+          fields,
+          primaryKeys: ['ssot__Id__c'],
+          relationships: [],
+        },
+      ],
+    };
+    const { client } = await clientReturning([response]);
+    const discovery = await discoverSegmentMemberDetails(
+      client,
+      {
+        marketSegmentId: '1sgaj000000PveD',
+        latestMembershipDmo: 'Individual_Unified_SM_123__dlm',
+        segmentOnDmo: 'UnifiedIndividual__dlm',
+      },
+      'Eurex'
+    );
+    expect(discovery.segmentOnDmo).to.equal('UnifiedIndividual__dlm');
+    expect(discovery.columns).to.have.length(7);
+    expect(discovery.dataSpace).to.equal('Eurex');
   });
 
   for (const marketSegmentId of ['1sgaj000000PveD', '1sgaj000000PveDAAG']) {
@@ -331,6 +415,7 @@ describe('segment member detail service', () => {
       },
     ]);
     const result = await querySegmentMemberDetails(bounded.client, source, {
+      dataSpace: 'default',
       rowLimit: 200,
       paginationLimits: { maxItems: 500 },
     });
@@ -349,7 +434,7 @@ describe('segment member detail service', () => {
       metadata,
       { status: 'COMPLETED', metadata: outputMetadata, data: [row(1)], totalSize: 2 },
     ]);
-    const result = await querySegmentMemberDetails(client, source, { rowLimit: 1 });
+    const result = await querySegmentMemberDetails(client, source, { dataSpace: 'default', rowLimit: 1 });
     const error = await captureError(collect(result.rows));
     expect(error.name).to.equal('InvalidData360QueryEnvelope');
     expect(error.message).to.contain('conclusively describe one complete page');
@@ -368,7 +453,7 @@ describe('segment member detail service', () => {
         totalSize: 1,
       };
       const { client } = await clientReturning([metadata, response]);
-      const result = await querySegmentMemberDetails(client, source);
+      const result = await querySegmentMemberDetails(client, source, { dataSpace: 'default' });
       const iterator = result.rows[Symbol.asyncIterator]();
       const error = await captureError(iterator.next());
 
@@ -382,7 +467,7 @@ describe('segment member detail service', () => {
       metadata,
       { status: 'COMPLETED', metadata: outputMetadata, data: [row(1)], totalSize: 1 },
     ]);
-    const result = await querySegmentMemberDetails(client, source);
+    const result = await querySegmentMemberDetails(client, source, { dataSpace: 'default' });
     expect(await collect(result.rows)).to.deep.equal([row(1).slice(0, -2)]);
   });
 
@@ -390,7 +475,7 @@ describe('segment member detail service', () => {
     const live = await loadLiveQueryFixture();
     const liveMetadata = metadataForLiveQueryFixture(live);
     const { client } = await clientReturning([liveMetadata, live]);
-    const result = await querySegmentMemberDetails(client, source);
+    const result = await querySegmentMemberDetails(client, source, { dataSpace: 'default' });
 
     expect(await collect(result.rows)).to.deep.equal([
       Array.from({ length: 19 }, (_, index) => (index === 8 ? 'individual-placeholder' : null)),
@@ -410,7 +495,7 @@ describe('segment member detail service', () => {
       if ('returnedRows' in malformed.change) live.returnedRows = malformed.change.returnedRows;
       else Object.assign(live.status as Record<string, unknown>, malformed.change);
       const { client } = await clientReturning([metadataForLiveQueryFixture(live), live]);
-      const result = await querySegmentMemberDetails(client, source);
+      const result = await querySegmentMemberDetails(client, source, { dataSpace: 'default' });
 
       expect((await captureError(collect(result.rows))).name).to.equal('InvalidData360QueryEnvelope');
     });
@@ -420,15 +505,15 @@ describe('segment member detail service', () => {
     const live = await loadLiveQueryFixture();
     delete (live.status as Record<string, unknown>).queryId;
     const { client } = await clientReturning([metadataForLiveQueryFixture(live), live]);
-    const result = await querySegmentMemberDetails(client, source);
+    const result = await querySegmentMemberDetails(client, source, { dataSpace: 'default' });
     expect(await collect(result.rows)).to.have.length(1);
   });
 
   it('rejects an invalid requested page size before submitting SQL', async () => {
     const { client, requests } = await clientReturning([metadata]);
-    expect((await captureError(querySegmentMemberDetails(client, source, { rowLimit: 0 }))).name).to.equal(
-      'InvalidData360RowLimit'
-    );
+    expect(
+      (await captureError(querySegmentMemberDetails(client, source, { dataSpace: 'default', rowLimit: 0 }))).name
+    ).to.equal('InvalidData360RowLimit');
     expect(requests.some((request) => request.method === 'POST')).to.equal(false);
   });
 
@@ -437,7 +522,7 @@ describe('segment member detail service', () => {
     live.completionStatus = 'Completed';
     const { client } = await clientReturning([metadata, live]);
 
-    expect((await captureError(querySegmentMemberDetails(client, source))).name).to.equal(
+    expect((await captureError(querySegmentMemberDetails(client, source, { dataSpace: 'default' }))).name).to.equal(
       'InvalidData360QueryEnvelope'
     );
   });
@@ -464,7 +549,7 @@ describe('segment member detail service', () => {
         return { data, metadata: outputMetadata, returnedRows: data.length };
       }),
     ]);
-    const result = await querySegmentMemberDetails(client, source, { rowLimit: 200 });
+    const result = await querySegmentMemberDetails(client, source, { dataSpace: 'default', rowLimit: 200 });
     expect(await collect(result.rows)).to.deep.equal(allRows.map((entry) => entry.slice(0, -2)));
     expect(JSON.parse(requests[2].body ?? '{}')).to.have.property('rowLimit', 200);
     expect(requests.slice(3).map((request) => request.url)).to.deep.equal(
@@ -481,7 +566,10 @@ describe('segment member detail service', () => {
       { status: { queryId: 'nested-poll', completionStatus: 'ResultsProduced', rowCount: 1 } },
       { data: [row(1)], metadata: outputMetadata, returnedRows: 1 },
     ]);
-    const result = await querySegmentMemberDetails(client, source, { polling: { intervalMs: 0 } });
+    const result = await querySegmentMemberDetails(client, source, {
+      dataSpace: 'default',
+      polling: { intervalMs: 0 },
+    });
     expect(await collect(result.rows)).to.have.length(1);
     expect(requests[3].url).to.equal('/services/data/v67.0/ssot/query-sql/nested-poll');
   });
@@ -498,7 +586,7 @@ describe('segment member detail service', () => {
         },
         { data, metadata: outputMetadata, returnedRows: data.length },
       ]);
-      const result = await querySegmentMemberDetails(client, source, { rowLimit: 2 });
+      const result = await querySegmentMemberDetails(client, source, { dataSpace: 'default', rowLimit: 2 });
       expect((await captureError(collect(result.rows))).name).to.equal('InvalidData360RowsEnvelope');
     });
   }
@@ -517,7 +605,7 @@ describe('segment member detail service', () => {
       const { client } = await clientReturning([metadata, response]);
       const error = await captureError(
         (async () => {
-          const result = await querySegmentMemberDetails(client, source);
+          const result = await querySegmentMemberDetails(client, source, { dataSpace: 'default' });
           await collect(result.rows);
         })()
       );
@@ -535,7 +623,9 @@ describe('segment member detail service', () => {
           status: { queryId: 'failed-query', completionStatus, rowCount: 1 },
         },
       ]);
-      expect((await captureError(querySegmentMemberDetails(client, source))).name).to.equal('Data360QueryFailed');
+      expect((await captureError(querySegmentMemberDetails(client, source, { dataSpace: 'default' }))).name).to.equal(
+        'Data360QueryFailed'
+      );
     });
   }
 
@@ -545,7 +635,9 @@ describe('segment member detail service', () => {
       { status: { queryId: 'poll-fail', completionStatus: 'Running' } },
       { data: [], status: { queryId: 'poll-fail', completionStatus: 'Failed' } },
     ]);
-    expect((await captureError(querySegmentMemberDetails(client, source))).name).to.equal('Data360QueryFailed');
+    expect((await captureError(querySegmentMemberDetails(client, source, { dataSpace: 'default' }))).name).to.equal(
+      'Data360QueryFailed'
+    );
   });
 
   it('rejects a changed total or query ID on continuation', async () => {
@@ -561,7 +653,7 @@ describe('segment member detail service', () => {
         { data: [row(1)], metadata: outputMetadata, ...change },
       ]);
       // eslint-disable-next-line no-await-in-loop -- exercise independent malformed continuation variants
-      const result = await querySegmentMemberDetails(client, source, { rowLimit: 1 });
+      const result = await querySegmentMemberDetails(client, source, { dataSpace: 'default', rowLimit: 1 });
       // eslint-disable-next-line no-await-in-loop -- each iterator must reject independently
       expect((await captureError(collect(result.rows))).name).to.match(/^InvalidData360/u);
     }
@@ -590,6 +682,7 @@ describe('segment member detail service', () => {
       },
     ]);
     const result = await querySegmentMemberDetails(client, source, {
+      dataSpace: 'default',
       rowLimit: 1,
       polling: { intervalMs: 0, maxAttempts: 2 },
     });
@@ -598,7 +691,7 @@ describe('segment member detail service', () => {
     expect(rows).to.have.length(2);
     expect(rows[1]).to.deep.equal(row(0, 'membership-2').slice(0, -2));
     expect(requests.map((request) => request.url)).to.deep.equal([
-      '/services/data/v67.0/query?q=SELECT+Id%2C+Name+FROM+DataSpace+WHERE+Name+%3D+%27default%27+LIMIT+2',
+      '/services/data/v67.0/query?q=SELECT+Id%2C+DataSpaceApiName+FROM+DataSpace+WHERE+DataSpaceApiName+%3D+%27default%27+LIMIT+2',
       '/services/data/v67.0/ssot/metadata',
       '/services/data/v67.0/ssot/query-sql',
       '/services/data/v67.0/ssot/query-sql/query-async',
@@ -614,14 +707,14 @@ describe('segment member detail service', () => {
       metadata,
       { queryId: 'query-zero', metadata: outputMetadata, data: [zero], totalSize: 1 },
     ]);
-    const zeroResult = await querySegmentMemberDetails(zeroClient.client, source);
+    const zeroResult = await querySegmentMemberDetails(zeroClient.client, source, { dataSpace: 'default' });
     expect(await collect(zeroResult.rows)).to.deep.equal([Array.from({ length: 19 }, () => null)]);
 
     const multipleClient = await clientReturning([
       metadata,
       { queryId: 'query-many', metadata: outputMetadata, data: [row(2)], totalSize: 1 },
     ]);
-    const multiple = await querySegmentMemberDetails(multipleClient.client, source);
+    const multiple = await querySegmentMemberDetails(multipleClient.client, source, { dataSpace: 'default' });
     const error = await captureError(collect(multiple.rows));
     expect(error.name).to.equal('MultipleSegmentDetailMatches');
     expect(error.message).to.contain('membership-1');
@@ -632,7 +725,7 @@ describe('segment member detail service', () => {
       metadata,
       { queryId: 'query-width', metadata: outputMetadata, data: [row(1).slice(1)], totalSize: 1 },
     ]);
-    const widthResult = await querySegmentMemberDetails(widthClient.client, source);
+    const widthResult = await querySegmentMemberDetails(widthClient.client, source, { dataSpace: 'default' });
     expect((await captureError(collect(widthResult.rows))).name).to.equal('Data360RowWidthError');
 
     const wrongMetadata = [...outputMetadata];
@@ -641,7 +734,7 @@ describe('segment member detail service', () => {
       metadata,
       { queryId: 'query-order', metadata: wrongMetadata, data: [row(1)], totalSize: 1 },
     ]);
-    const orderResult = await querySegmentMemberDetails(orderClient.client, source);
+    const orderResult = await querySegmentMemberDetails(orderClient.client, source, { dataSpace: 'default' });
     expect((await captureError(collect(orderResult.rows))).name).to.equal('InvalidData360QueryMetadata');
   });
 
@@ -745,9 +838,9 @@ describe('segment member detail service', () => {
     ).to.equal('MismatchedSegmentDetailQualifier');
 
     const malformed = await clientReturning([metadata, { unexpected: true }]);
-    expect((await captureError(querySegmentMemberDetails(malformed.client, source))).name).to.equal(
-      'InvalidData360QueryEnvelope'
-    );
+    expect(
+      (await captureError(querySegmentMemberDetails(malformed.client, source, { dataSpace: 'default' }))).name
+    ).to.equal('InvalidData360QueryEnvelope');
   });
 
   it('preserves actionable permission and data-space request errors', async () => {

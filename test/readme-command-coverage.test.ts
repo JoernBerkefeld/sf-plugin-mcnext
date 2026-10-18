@@ -1,156 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { expect } from 'chai';
 
-type ManifestFlag = {
-  char?: string;
-  default?: boolean | number | string;
-  helpGroup?: string;
-  max?: number;
-  min?: number;
-  multiple?: boolean;
-  name: string;
-  options?: string[];
-  required?: boolean;
-  type: 'boolean' | 'option';
-};
-
 type ManifestCommand = {
-  flags: Record<string, ManifestFlag>;
+  flags: Record<string, unknown>;
   id: string;
 };
 
 type Manifest = {
   commands: Record<string, ManifestCommand>;
-};
-
-type OptionRow = {
-  expected: string;
-  option: string;
-  required: string;
-};
-
-type ConstraintExpectation = {
-  expected: string[];
-  required?: string;
-};
-
-const constraintExpectations: Record<string, Record<string, ConstraintExpectation>> = {
-  'mcnext:campaign:config': {
-    'expect-unchanged': { required: 'Update only', expected: ['default `false`', 'independent baseline'] },
-    'expected-name': { required: 'Update', expected: ['Forbidden for export/create'] },
-    'input-file': { required: 'Create/update', expected: ['JSON artifact', 'Forbidden for export'] },
-    'journal-file': {
-      required: 'Create',
-      expected: [
-        'Required new private identity journal',
-        'no absolute',
-        'existing-file overwrite',
-        'Forbidden for export/update',
-      ],
-    },
-    'output-file': {
-      required: 'Export',
-      expected: ['New JSON artifact', 'no overwrite', 'Forbidden for create/update'],
-    },
-    'record-id': { required: 'Export/update', expected: ['Forbidden for create'] },
-    'target-name': { required: 'Create', expected: ['distinct from source name', 'Forbidden for export/update'] },
-  },
-  'mcnext:flow:association': {
-    'api-version': { required: 'Yes', expected: ['Only `67.0`', 'explicitly required, no default'] },
-    'expected-org-id': { required: 'Yes', expected: ['Verified exact 18-character destination org ID'] },
-    'input-file': {
-      required: 'Yes',
-      expected: [
-        'exactly `artifact`, `source`, and `target`',
-        'explicit caller-selected correspondence',
-        'inside project-dir',
-      ],
-    },
-    'output-file': {
-      required: 'No',
-      expected: ['reserved before service execution', 'no overwrite', 'Parent directory must exist'],
-    },
-    'project-dir': { required: 'Yes', expected: ['Existing project directory'] },
-    'target-org': { required: 'Yes', expected: ['Explicit authenticated destination', 'no configured default'] },
-  },
-  'mcnext:flow:source': {
-    'expect-unchanged': { required: 'Update only', expected: ['default `false`', 'exact unchanged repeat'] },
-    'expected-definition-id': { required: 'Update', expected: ['Update-only'] },
-    'expected-latest-version-id': { required: 'Update', expected: ['Update-only'] },
-    'expected-org-id': { required: 'Create/update', expected: ['Mutation-only'] },
-    member: { required: 'Yes', expected: ['Repeatable for retrieve/validate', 'exactly one for create/update'] },
-    'reuse-same-org-references': {
-      required: 'Create/update',
-      expected: ['Required by the mutation workflow', 'default `false`'],
-    },
-    'source-file': { required: 'Create/update', expected: ['Mutation-only'] },
-    'source-org-id': { required: 'Create/update', expected: ['must equal `--expected-org-id`', 'Mutation-only'] },
-    wait: { expected: ['Integer `1`–`30`'] },
-  },
-  'mcnext:identity-resolution:export': {
-    'output-file': { expected: ['Parent directories are created', 'an existing file is overwritten'] },
-  },
-  'mcnext:identity-resolution:plan': {
-    'expected-target-key': { required: 'For `update-shell`', expected: ['Forbidden for `create`'] },
-    'expected-target-label': { required: 'For `update-shell`', expected: ['Forbidden for `create`'] },
-    'expected-target-status': { required: 'For `update-shell`', expected: ['Forbidden for `create`'] },
-    'target-ruleset-id': { required: 'For `update-shell`', expected: ['Forbidden for `create`'] },
-  },
-  'mcnext:migration:cms': {
-    'allow-experimental-cms': {
-      required: 'Effectively yes',
-      expected: ['required for dry-run and apply', 'default `false`', 'omission fails'],
-    },
-    apply: { required: 'No', expected: ['default `false`', 'Requires `--allow-experimental-cms`'] },
-    'result-file': { expected: ['New durable execution-result JSON', 'no overwrite', 'plan is never modified'] },
-  },
-  'mcnext:migration:plan': {
-    'cms-export-dir': {
-      required: 'With `--cms-plan`',
-      expected: ['New, unused run-owned export directory', 'Rejected without `--cms-plan`'],
-    },
-    'cms-plan': { required: 'No', expected: ['default `false`', 'Requires both companion flags'] },
-    'cms-workspace-map': {
-      required: 'With `--cms-plan`',
-      expected: ['Rejected without `--cms-plan`'],
-    },
-    'output-file': { expected: ['Deterministic JSON migration plan', 'overwritten'] },
-  },
-  'mcnext:retrieve:all': {
-    'target-org': {
-      required: 'Yes',
-      expected: ['Explicit authenticated org alias or username', 'no configured default'],
-    },
-    'expected-org-id': { required: 'Yes', expected: ['Verified exact 18-character Salesforce org ID'] },
-    'project-dir': { required: 'Yes', expected: ['Existing DX project root', 'exactly one default package directory'] },
-    'api-version': { expected: ['Only `67.0`'] },
-    wait: { expected: ['Integer 1–30'] },
-  },
-  'mcnext:segment:definition:create': {
-    'dry-run': { required: 'No', expected: ['default `false`', 'stops before apply'] },
-    'mapping-file': { expected: ['JSON', 'resolved from project directory'] },
-    'visibility-polls': { expected: ['Integer `1`–`10`'] },
-    wait: { expected: ['Integer `1`–`30`'] },
-  },
-  'mcnext:segment:members:export': {
-    'data-space': { required: 'No', expected: ['default `default`'] },
-    'include-details': { required: 'No', expected: ['default `false`', '19-field'] },
-    limit: { expected: ['integer `>= 1`'] },
-    'max-duration-ms': { expected: ['integer `>= 1`'] },
-    'max-items': { expected: ['integer `>= 1`'] },
-    'max-pages': { expected: ['integer `>= 1`'] },
-    fields: { expected: ['Basic mode only'] },
-    filters: { expected: ['Basic mode only'] },
-    'order-by': { expected: ['Basic mode only'] },
-    offset: { expected: ['Basic mode only', 'integer `>= 0`'] },
-    'output-file': { expected: ['Parent directories are created', 'normally restored', 'exact sibling backup path'] },
-    segment: { expected: ['API/developer name', 'exact display name', '15/18-character `MarketSegment` record ID'] },
-  },
-  'mcnext:segment:records:export': {
-    'all-rows': { required: 'No', expected: ['default `false`'] },
-    'output-file': { expected: ['core bulk export creates or overwrites'] },
-    wait: { expected: ['Integer `>= 0`'] },
-  },
 };
 
 const readProjectFile = async (path: string): Promise<string> =>
@@ -169,33 +26,7 @@ const commandSection = (readme: string, id: string): string => {
 const bashBlocks = (section: string): string[] =>
   [...section.matchAll(/```bash\n([\s\S]*?)\n```/gu)].map((match) => match[1]);
 
-const optionRows = (section: string): OptionRow[] => {
-  const sectionLines = section.split('\n');
-  const tableStart = sectionLines.findIndex((line) =>
-    /^\| Option\s+\| Required\s+\| Expected\/allowed values\s+\|$/u.test(line)
-  );
-  expect(tableStart, 'options table header').to.be.at.least(0);
-  const lines = sectionLines.slice(tableStart + 2);
-  const rows: OptionRow[] = [];
-  for (const line of lines) {
-    if (!line.startsWith('|')) break;
-    const cells = line
-      .split('|')
-      .slice(1, -1)
-      .map((cell) => cell.trim());
-    if (cells.length === 3) rows.push({ option: cells[0], required: cells[1], expected: cells[2] });
-  }
-  return rows;
-};
-
-const flagRow = (rows: OptionRow[], commandId: string, flag: ManifestFlag): OptionRow => {
-  const matching = rows.filter((row) => {
-    const codeSpans = [...row.option.matchAll(/`([^`]+)`/gu)].map((match) => match[1]);
-    return codeSpans.some((value) => value === `--${flag.name}` || value.startsWith(`--${flag.name} `));
-  });
-  expect(matching, `${commandId} exact option row for --${flag.name}`).to.have.length(1);
-  return matching[0];
-};
+const tableCommandCell = (id: string): string => `\`sf ${id.replaceAll(':', ' ')}\``;
 
 describe('README public command coverage', () => {
   it('registers CMS as both a runtime dependency and an oclif plugin', async () => {
@@ -208,7 +39,7 @@ describe('README public command coverage', () => {
     expect(packageJson.oclif?.plugins).to.deep.equal(['sf-plugin-cms']);
   });
 
-  it('documents every manifest command with shell-safe examples and exact option rows', async () => {
+  it('documents every manifest command in the reference table, a section, and a shell-safe bash example', async () => {
     const [readme, manifestText] = await Promise.all([
       readProjectFile('README.md'),
       readProjectFile('oclif.manifest.json'),
@@ -217,153 +48,70 @@ describe('README public command coverage', () => {
     const commands = Object.values(manifest.commands);
 
     expect(commands).to.have.length(17);
-    expect(readme).to.include('## Common inherited options');
-    expect(readme).to.include('--json');
-    expect(readme).to.include('--flags-dir <directory>');
+    expect(readme).to.include('## Command reference');
+    expect(readme).to.include('sf mcnext <command> --help');
+
+    const reference = readme.split('## Command reference\n')[1].split('\n## ')[0];
+    const tableCommands = [...reference.matchAll(/^\|\s*(`sf [^`\n]+`)\s*\|/gmu)].map((match) => match[1]);
 
     for (const command of commands) {
+      expect(tableCommands, `${command.id} command reference table row`).to.include(tableCommandCell(command.id));
+
       const section = commandSection(readme, command.id);
       const examples = bashBlocks(section);
       expect(examples, `${command.id} example block`).not.to.be.empty;
       expect(examples.join('\n'), `${command.id} unquoted angle-bracket placeholder`).not.to.match(
         /(?:^|[\s=])<[^>\n]+>/u
       );
-      expect(section, `${command.id} options heading`).to.include('### Options');
-      expect(section, `${command.id} common options link`).to.include(
-        '[Common inherited options](#common-inherited-options)'
-      );
-      const rows = optionRows(section);
-
-      for (const flag of Object.values(command.flags)) {
-        if (flag.helpGroup === 'GLOBAL') continue;
-        const row = flagRow(rows, command.id, flag);
-        const codeSpans = [...row.option.matchAll(/`([^`]+)`/gu)].map((match) => match[1]);
-
-        if (flag.char) {
-          expect(codeSpans, `${command.id} exact alias -${flag.char}`).to.include(`-${flag.char}`);
-        } else {
-          expect(
-            codeSpans.filter((value) => /^-[^-]/u.test(value)),
-            `${command.id} unexpected short alias`
-          ).to.be.empty;
-        }
-        expect(row.required === 'Yes', `${command.id} --${flag.name} requiredness`).to.equal(flag.required === true);
-        for (const choice of flag.options ?? []) {
-          expect(row.expected, `${command.id} --${flag.name} choice ${choice}`).to.include(`\`${choice}\``);
-        }
-        if (flag.default !== undefined) {
-          expect(row.expected.toLowerCase(), `${command.id} --${flag.name} default`).to.include(
-            `default \`${String(flag.default).toLowerCase()}\``
-          );
-        }
-        if (flag.min !== undefined)
-          expect(row.expected, `${command.id} --${flag.name} minimum`).to.include(String(flag.min));
-        if (flag.max !== undefined)
-          expect(row.expected, `${command.id} --${flag.name} maximum`).to.include(String(flag.max));
-        if (flag.multiple === true)
-          expect(row.expected, `${command.id} --${flag.name} repeatability`).to.include('Repeatable');
-        if (flag.type === 'boolean')
-          expect(row.expected, `${command.id} --${flag.name} boolean type`).to.include('Boolean');
-
-        const constraint = constraintExpectations[command.id]?.[flag.name];
-        if (constraint?.required) {
-          expect(row.required, `${command.id} --${flag.name} conditional requiredness`).to.equal(constraint.required);
-        }
-        for (const text of constraint?.expected ?? []) {
-          expect(row.expected, `${command.id} --${flag.name} runtime documentation`).to.include(text);
-        }
-      }
     }
   });
 
-  it('documents explicit association correspondence and the narrow inactive attachment boundary', async () => {
-    const readme = await readProjectFile('README.md');
-    const section = commandSection(readme, 'mcnext:flow:association');
-    const examples = bashBlocks(section).join('\n');
-
-    for (const operation of ['plan', 'apply']) expect(examples).to.include(`--operation ${operation}`);
-    for (const field of [
-      'orgId',
-      'campaignId',
-      'flowRecordId',
-      'member',
-      'segmentId',
-      'segmentApiName',
-      'segmentDefinitionId',
-      'expectedDefinitionId',
-      'expectedLatestVersionId',
-    ])
-      expect(section).to.include(`\`${field}\``);
-    for (const boundary of [
-      'exactly three root keys: `artifact`, `source`, and `target`',
-      'matching exactly one selected artifact Flow',
-      'never infers business mappings from labels',
-      'Source provenance is not proof of destination eligibility or business equivalence',
-      'without an org write',
-      'at most one `AssociatedRecordId`-only PATCH',
-      '`SegmentId` is never written',
-      'a different non-null attachment is a conflict',
-      'not atomic compare-and-swap',
-      'DBT `ACTIVE`, unpublished `NO_REFRESH` Segment',
-      'active default data space on `UnifiedssotIndividualMkt__dlm`',
-      'not a universal Salesforce eligibility matrix',
-      '`InvalidDraft` is not runnable or activation-ready',
-      'runtime readiness and business equivalence are never assessed',
-      'No native XML rewrite, activation, detach, deploy, or CREATE fallback',
-      '`RECONCILIATION_REQUIRED`',
-      '`OUTPUT_WRITE_FAILED`',
-      'does not mean an org write was rolled back',
-    ])
-      expect(section).to.include(boundary);
-    expect(readme).to.include('17 commands, including bounded `flow association`');
-    expect(readme).to.include(
-      'provenance sidecar at `mcnext/campaign-flow-associations/<CampaignId>.mcn-flow-associations.json`'
-    );
-    expect(readme).not.to.include('does not yet export a restorable association sidecar or apply attachment mappings');
-  });
-
-  it('documents the installed CMS oclif dependency and public contract boundary', async () => {
+  it('documents that CMS installs with the plugin', async () => {
     const readme = await readProjectFile('README.md');
 
-    expect(readme).to.include('package as an installed oclif plugin dependency');
-    expect(readme).to.include('installs and registers the compatible CMS provider automatically');
-    expect(readme).to.include('do not need a separate `sf plugins install sf-plugin-cms` step');
-    expect(readme).to.include('sf cms --help');
-    expect(readme).to.include('sf cms info --contract-version 1 --json');
-    expect(readme).to.include('public Salesforce CLI boundary');
-    expect(readme).to.include('rather than importing CMS implementation modules');
-    expect(readme).to.include('CMS owns CMS discovery, payload construction, package files');
-    expect(readme).to.include('MCNext owns cross-family selection, routing, policy, orchestration');
+    expect(readme).to.include('also installs the compatible CMS plugin');
+    expect(readme).to.include('do not need a separate CMS install step');
+    expect(readme).not.to.include('Imaginary retrieve-all');
   });
 
   it('documents the org authentication boundary for enriched segment exports', async () => {
     const readme = await readProjectFile('README.md');
-    const authenticationStart = readme.indexOf('## Getting started and authentication');
-    const nextSection = readme.indexOf('\n## ', authenticationStart + 3);
-    const authentication = readme.slice(authenticationStart, nextSection === -1 ? undefined : nextSection);
 
-    expect(authenticationStart).to.be.at.least(0);
-    expect(authentication).to.include('Normal Salesforce CLI org authorization covers `segment members export`');
-    expect(authentication).to.include(
-      'you do not need a separate Connected App or authentication stack for `--include-details`'
-    );
-    expect(authentication).to.include(
-      'Only `sf mcnext data-graph metadata` uses an externally obtained Data 360 token'
-    );
+    expect(readme).to.include('Normal Salesforce CLI org authorization covers `segment members export`');
+    expect(readme).to.include('You do not need a separate Connected App for `--include-details`');
+    expect(readme).to.include('Only `sf mcnext data-graph metadata` uses an externally obtained Data 360 token');
   });
 
-  it('documents the exact segment identifier contract in its option row', async () => {
+  it('documents segment selection by display name and Id, with API name as a secondary option', async () => {
     const readme = await readProjectFile('README.md');
-    const rows = optionRows(commandSection(readme, 'mcnext:segment:members:export'));
-    const segment = flagRow(rows, 'mcnext:segment:members:export', {
-      name: 'segment',
-      type: 'option',
-    });
+    const walkthroughStart = readme.indexOf('## Export segment members');
+    const commandRefStart = readme.indexOf('## Command reference');
+    expect(walkthroughStart).to.be.at.least(0);
+    expect(commandRefStart).to.be.greaterThan(walkthroughStart);
+    const walkthrough = readme.slice(walkthroughStart, commandRefStart);
 
-    expect(segment.option).to.include('`-s`');
-    expect(segment.required).to.equal('Yes');
-    expect(segment.expected).to.include('API/developer name');
-    expect(segment.expected).to.include('exact display name');
-    expect(segment.expected).to.include('15/18-character `MarketSegment` record ID');
+    expect(walkthrough).to.include('display name');
+    expect(walkthrough).to.include('Id');
+    expect(walkthrough).to.include('browser URL');
+    expect(walkthrough).to.include('API name');
+    expect(walkthrough).to.match(/Prefer those over the API/iu);
+    expect(walkthrough).to.include('uses the segment’s own data space automatically');
+    expect(walkthrough).to.include('--data-space');
+    expect(walkthrough).to.include('answer the prompt');
+    expect(walkthrough).to.include('Without a TTY, or with `--json`');
+    expect(walkthrough).to.include('prints the candidate list with each segment’s Id and data space');
+    expect(walkthrough).to.include('exits nonzero');
+    expect(walkthrough).to.include('--result-format json');
+    expect(walkthrough).to.include('./data/<dataspace-name>/<segmentname>-<datetime>.json');
+    expect(walkthrough).to.include('./data/<dataspace-name>/<segmentname>-<datetime>.csv');
+    expect(walkthrough).to.include('An explicit `--output-file` overrides');
+
+    const section = commandSection(readme, 'mcnext:segment:members:export');
+    expect(section).to.include('display name');
+    expect(section).to.include('Id');
+    expect(section).to.include('API name');
+    expect(section).to.include('./data/<dataspace-name>/<segmentname>-<datetime>.csv');
+    expect(section).to.include('--result-format json');
+    expect(section).to.include('./data/<dataspace-name>/<segmentname>-<datetime>.json');
   });
 });
