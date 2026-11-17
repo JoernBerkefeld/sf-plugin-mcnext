@@ -16,7 +16,6 @@
   },
   "homepage": "https://github.com/JoernBerkefeld/sf-plugin-mcnext#readme",
   "dependencies": {
-    "@inquirer/select": "^5.2.6",
     "@oclif/core": "^4",
     "@salesforce/core": "^9",
     "@salesforce/sf-plugins-core": "^12",

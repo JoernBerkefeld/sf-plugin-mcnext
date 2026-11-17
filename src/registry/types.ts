@@ -45,7 +45,7 @@ export type TypeHandler = {
 
 /** A registered Marketing Cloud Next capability. */
 export type McnType = {
-  /** CLI-facing name, for example marketSegmentMember. */
+  /** CLI-facing name, for example marketSegmentDefinition. */
   name: string;
   /** One-line description used in list output and documentation. */
   description: string;

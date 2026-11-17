@@ -75,7 +75,6 @@ try {
     'mcnext:migration:plan',
     'mcnext:retrieve:all',
     'mcnext:segment:definition:create',
-    'mcnext:segment:members:export',
     'mcnext:segment:records:export',
   ].sort();
   assert.deepEqual(commandIds, expectedCommandIds, 'manifest public command IDs do not match the Phase 2 contract');
@@ -97,7 +96,6 @@ try {
   assert.deepEqual(
     registryContract,
     {
-      marketSegmentMember: { operations: ['export'], provider: 'mcnext', state: 'implemented' },
       listEmail: { operations: ['retrieve'], provider: 'core-sf', state: 'delegated' },
       emailTemplate: { operations: ['retrieve'], provider: 'mcnext', state: 'implemented' },
       campaign: { operations: ['retrieve', 'create', 'update'], provider: 'mcnext', state: 'implemented' },

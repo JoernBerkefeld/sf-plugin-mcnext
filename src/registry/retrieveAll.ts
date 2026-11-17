@@ -9,7 +9,7 @@ import { runCore, type CoreRunner } from '../core/flowCli.js';
 import {
   correlateCampaignSegmentDefinitions,
   type CampaignSegmentCorrelationResult,
-} from '../segment/segmentMembers.js';
+} from '../segment/segmentCorrelation.js';
 import {
   retrieveAndPublishMarketingCms,
   validateRetrievalProject,

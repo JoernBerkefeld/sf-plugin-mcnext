@@ -8,13 +8,6 @@ import { McnType, Provider, SupportState } from './types.js';
  */
 export const MCN_TYPES: McnType[] = [
   {
-    name: 'marketSegmentMember',
-    description: 'Computed segment membership exported through the MCN Connect API',
-    provider: 'mcnext',
-    state: 'implemented',
-    operations: ['export'],
-  },
-  {
     name: 'listEmail',
     description: 'ListEmail send definitions stored as Salesforce records',
     provider: 'core-sf',
@@ -31,7 +24,8 @@ export const MCN_TYPES: McnType[] = [
     state: 'implemented',
     operations: ['retrieve'],
     directory: 'emailTemplate',
-    limitation: 'Exact read-only retrieval only; create, update, publication, variants, and migration are not supported.',
+    limitation:
+      'Exact read-only retrieval only; create, update, publication, variants, and migration are not supported.',
   },
   {
     name: 'campaign',
@@ -40,7 +34,8 @@ export const MCN_TYPES: McnType[] = [
     state: 'implemented',
     operations: ['retrieve', 'create', 'update'],
     directory: 'campaign',
-    limitation: 'Selected scalar configuration only; members, sends, relationships, custom fields, and lifecycle are excluded.',
+    limitation:
+      'Selected scalar configuration only; members, sends, relationships, custom fields, and lifecycle are excluded.',
   },
   {
     name: 'dataGraph',
@@ -49,7 +44,8 @@ export const MCN_TYPES: McnType[] = [
     state: 'implemented',
     operations: ['retrieve'],
     directory: 'dataGraph',
-    limitation: 'Metadata GET only with an externally obtained Data 360 token; graph mutation and token exchange are excluded.',
+    limitation:
+      'Metadata GET only with an externally obtained Data 360 token; graph mutation and token exchange are excluded.',
   },
   {
     name: 'identityResolution',
@@ -77,7 +73,8 @@ export const MCN_TYPES: McnType[] = [
     state: 'implemented',
     operations: ['retrieve', 'create', 'update'],
     directory: 'flow',
-    limitation: 'Selected inactive Flow source only; activation, runtime readiness, cross-org reference mapping, and lifecycle are excluded.',
+    limitation:
+      'Selected inactive Flow source only; activation, runtime readiness, cross-org reference mapping, and lifecycle are excluded.',
   },
   {
     name: 'flowDefinition',

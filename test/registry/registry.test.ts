@@ -17,8 +17,6 @@ describe('type registry', () => {
   });
 
   it('presents only proven MCN operations as implemented', () => {
-    expect(getType('marketSegmentMember')).to.include({ provider: 'mcnext', state: 'implemented' });
-    expect(getType('marketSegmentMember')?.operations).to.deep.equal(['export']);
     expect(getType('identityResolution')?.state).to.equal('implemented');
     expect(getType('identityResolution')?.operations).to.deep.equal(['list', 'retrieve', 'export', 'plan']);
     expect(getType('identityResolution')?.limitation).to.contain('GET-only');
@@ -28,9 +26,10 @@ describe('type registry', () => {
     expect(getType('cmsContent')?.limitation).to.contain('separately installed sf-plugin-cms public CLI v1 contracts');
     expect(getType('cmsContent')?.limitation).to.contain('explicit experimental opt-in');
     expect(getType('cmsContent')?.limitation).to.contain('dry-runs every route before apply');
-    expect(getType('cmsContent')?.limitation).to.contain('MCN performs no payload inspection or CMS reference rewriting');
+    expect(getType('cmsContent')?.limitation).to.contain(
+      'MCN performs no payload inspection or CMS reference rewriting'
+    );
     expect(getTypes({ state: 'implemented' }).map((type) => type.name)).to.deep.equal([
-      'marketSegmentMember',
       'emailTemplate',
       'campaign',
       'dataGraph',
@@ -55,12 +54,12 @@ describe('type registry', () => {
     expect(getType('marketSegmentDefinition')?.operations).to.deep.equal(['create']);
   });
 
-  it('keeps segment definition, records, and computed membership distinct', () => {
+  it('keeps segment definition and records distinct, with member export moved to sf-plugin-data', () => {
     expect(getType('marketSegmentDefinition')).to.include({ provider: 'mcnext', state: 'implemented' });
     expect(getType('marketSegmentDefinition')?.operations).to.deep.equal(['create']);
     expect(getType('marketSegmentDefinition')?.limitation).to.contain('Strict CREATE');
     expect(getType('marketSegmentRecord')?.delegation?.sObject).to.equal('MarketSegment');
-    expect(getType('marketSegmentMember')?.provider).to.equal('mcnext');
+    expect(getType('marketSegmentMember')).to.equal(undefined);
   });
 
   it('selects only MarketSegment fields confirmed by the v67 describe', () => {

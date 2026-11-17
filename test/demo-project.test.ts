@@ -8,13 +8,6 @@ const expected = [
   ['force-app/main/default/flows/Autumn_Welcome.flow-meta.xml', 'flow', 'core-sf', 'existing-shape', 'existing-layout'],
   ['mcnext/campaigns/Autumn_Promo.mcn-campaign.json', 'campaign', 'core-sf', 'proposed-shape', 'proposed-layout'],
   [
-    'mcnext/segment-data/Autumn_Audience.mcn-segment-members.csv',
-    'segment-members',
-    'mcnext',
-    'existing-shape',
-    'proposed-layout',
-  ],
-  [
     'mcnext/segment-data/MarketSegment.mcn-segment-records.csv',
     'segment-records',
     'core-sf',
@@ -180,9 +173,8 @@ describe('imaginary retrieve-all demo project', () => {
       .and.to.contain('unverified');
   });
 
-  it('distinguishes endpoint membership from core record-export CSV', async () => {
-    expect(await csv(expected[3][0])).to.deep.equal([['id'], ['synthetic-member-001'], ['synthetic-member-002']]);
-    expect(await csv(expected[4][0])).to.deep.equal([
+  it('illustrates the core record-export CSV', async () => {
+    expect(await csv(expected[3][0])).to.deep.equal([
       ['Id', 'Name', 'MarketSegmentType', 'SegmentStatus', 'PublishStatus'],
       ['1sg000000000001AAA', 'Autumn_Audience', 'Standard', 'Draft', 'NotPublished'],
     ]);
@@ -199,7 +191,7 @@ describe('imaginary retrieve-all demo project', () => {
       title: string;
       folderPath: string[];
       companions: { rawHtml: string };
-    }>(expected[5][0]);
+    }>(expected[4][0]);
     expect(email).to.have.all.keys(
       'contract',
       'contractVersion',
@@ -238,7 +230,7 @@ describe('imaginary retrieve-all demo project', () => {
 
   it('keeps proposed Image source clean and unresolved vendor bookkeeping external', async () => {
     const image = await json<{ identity: { type: string; apiName: string }; companions: { media: string } }>(
-      expected[6][0]
+      expected[5][0]
     );
     expect(image).to.have.all.keys('identity', 'contentType', 'title', 'language', 'folderPath', 'companions');
     expect(image.identity.type).to.equal('Image');
@@ -249,7 +241,7 @@ describe('imaginary retrieve-all demo project', () => {
     };
     expect(svg.svg).to.exist;
     const inventory = await metadata<Inventory>('inventory.json');
-    expect(inventory.artifacts[6].formatStatus).to.equal('proposed-shape');
+    expect(inventory.artifacts[5].formatStatus).to.equal('proposed-shape');
     expect(inventory.unresolvedProviders).to.deep.equal([
       {
         provider: 'data360-vendor-unresolved',

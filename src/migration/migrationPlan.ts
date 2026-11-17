@@ -760,12 +760,12 @@ const INVENTORY: MigrationInventoryItem[] = [
   inventory(
     'segmentMembers',
     'secondary-data',
-    'MCN REST v67 export only',
+    'sf-plugin-data `sf data360 segment members export`',
     'unsupported',
     'Computed segment members',
     'Definitions migrated and membership recomputed in target',
     ['marketSegmentDefinition'],
-    'v0.1.0 supports bounded export',
+    'Member export moved to sf-plugin-data (`sf data360 segment members export`)',
     'Computed membership is not portable configuration or importable membership'
   ),
 ];

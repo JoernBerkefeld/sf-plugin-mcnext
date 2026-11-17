@@ -47,7 +47,7 @@ describe('README public command coverage', () => {
     const manifest = JSON.parse(manifestText) as Manifest;
     const commands = Object.values(manifest.commands);
 
-    expect(commands).to.have.length(17);
+    expect(commands).to.have.length(16);
     expect(readme).to.include('## Command reference');
     expect(readme).to.include('sf mcnext <command> --help');
 
@@ -74,44 +74,12 @@ describe('README public command coverage', () => {
     expect(readme).not.to.include('Imaginary retrieve-all');
   });
 
-  it('documents the org authentication boundary for enriched segment exports', async () => {
+  it('points segment member export users to sf-plugin-data', async () => {
     const readme = await readProjectFile('README.md');
 
-    expect(readme).to.include('Normal Salesforce CLI org authorization covers `segment members export`');
-    expect(readme).to.include('You do not need a separate Connected App for `--include-details`');
-    expect(readme).to.include('Only `sf mcnext data-graph metadata` uses an externally obtained Data 360 token');
-  });
-
-  it('documents segment selection by display name and Id, with API name as a secondary option', async () => {
-    const readme = await readProjectFile('README.md');
-    const walkthroughStart = readme.indexOf('## Export segment members');
-    const commandRefStart = readme.indexOf('## Command reference');
-    expect(walkthroughStart).to.be.at.least(0);
-    expect(commandRefStart).to.be.greaterThan(walkthroughStart);
-    const walkthrough = readme.slice(walkthroughStart, commandRefStart);
-
-    expect(walkthrough).to.include('display name');
-    expect(walkthrough).to.include('Id');
-    expect(walkthrough).to.include('browser URL');
-    expect(walkthrough).to.include('API name');
-    expect(walkthrough).to.match(/Prefer those over the API/iu);
-    expect(walkthrough).to.include('uses the segment’s own data space automatically');
-    expect(walkthrough).to.include('--data-space');
-    expect(walkthrough).to.include('answer the prompt');
-    expect(walkthrough).to.include('Without a TTY, or with `--json`');
-    expect(walkthrough).to.include('prints the candidate list with each segment’s Id and data space');
-    expect(walkthrough).to.include('exits nonzero');
-    expect(walkthrough).to.include('--result-format json');
-    expect(walkthrough).to.include('./data/<dataspace-name>/<segmentname>-<datetime>.json');
-    expect(walkthrough).to.include('./data/<dataspace-name>/<segmentname>-<datetime>.csv');
-    expect(walkthrough).to.include('An explicit `--output-file` overrides');
-
-    const section = commandSection(readme, 'mcnext:segment:members:export');
-    expect(section).to.include('display name');
-    expect(section).to.include('Id');
-    expect(section).to.include('API name');
-    expect(section).to.include('./data/<dataspace-name>/<segmentname>-<datetime>.csv');
-    expect(section).to.include('--result-format json');
-    expect(section).to.include('./data/<dataspace-name>/<segmentname>-<datetime>.json');
+    expect(readme).to.include('## Segment member export moved');
+    expect(readme).to.include('`sf data360 segment members export`');
+    expect(readme).to.include('sf plugins install sf-plugin-data');
+    expect(readme).not.to.include('sf mcnext segment members export');
   });
 });

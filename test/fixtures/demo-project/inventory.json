@@ -46,8 +46,7 @@
       "companions": [],
       "references": [
         "mcnext/campaigns/Autumn_Promo.mcn-campaign.json",
-        "cms/Demo_Workspace/email/Autumn_Welcome.cms-email.json",
-        "mcnext/segment-data/Autumn_Audience.mcn-segment-members.csv"
+        "cms/Demo_Workspace/email/Autumn_Welcome.cms-email.json"
       ]
     },
     {
@@ -62,17 +61,6 @@
       "references": ["force-app/main/default/flows/Autumn_Welcome.flow-meta.xml"]
     },
     {
-      "path": "mcnext/segment-data/Autumn_Audience.mcn-segment-members.csv",
-      "kind": "segment-members",
-      "workflowOwner": "mcnext",
-      "transportOwner": "mcnext",
-      "formatStatus": "existing-shape",
-      "layoutStatus": "proposed-layout",
-      "evidence": "Basic member endpoint response keys, opaque membership id; not a deployable segment definition",
-      "companions": [],
-      "references": ["mcnext/segment-data/MarketSegment.mcn-segment-records.csv"]
-    },
-    {
       "path": "mcnext/segment-data/MarketSegment.mcn-segment-records.csv",
       "kind": "segment-records",
       "workflowOwner": "mcnext",
@@ -81,7 +69,7 @@
       "layoutStatus": "proposed-layout",
       "evidence": "Core bulk-export projection and core-owned CSV transport; not a deployable segment definition",
       "companions": [],
-      "references": ["mcnext/segment-data/Autumn_Audience.mcn-segment-members.csv"]
+      "references": []
     },
     {
       "path": "cms/Demo_Workspace/email/Autumn_Welcome.cms-email.json",

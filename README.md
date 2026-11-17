@@ -5,7 +5,7 @@ Salesforce CLI plugin for inspecting, exporting, validating, or carefully moving
 Installing this plugin also installs the compatible CMS plugin (`sf-plugin-cms`); you do not need a separate CMS install step.
 
 - [Install and sign in](#installation-and-getting-started)
-- [Export segment members](#export-segment-members)
+- [Segment member export moved](#segment-member-export-moved)
 - [Command reference](#command-reference)
 - [Safety and limitations](#safety-and-limitations)
 
@@ -31,7 +31,7 @@ sf org display --target-org my-mcnext-org
 
 For a sandbox or custom login host, add `--instance-url` to `sf org login web`.
 
-Normal Salesforce CLI org authorization covers `segment members export` and every other org-backed command in this plugin. You do not need a separate Connected App for `--include-details`. Only `sf mcnext data-graph metadata` uses an externally obtained Data 360 token and tenant URL.
+Normal Salesforce CLI org authorization covers every org-backed command in this plugin. Only `sf mcnext data-graph metadata` uses an externally obtained Data 360 token and tenant URL.
 
 ### Install the plugin
 
@@ -42,45 +42,9 @@ sf mcnext list types
 
 If Salesforce CLI asks whether you trust this unsigned plugin, check the package name before confirming. The hidden `mcn` topic is a short alias for `mcnext`; this README uses canonical `mcnext` names. Run `sf mcnext <command> --help` for current flags.
 
-## Export segment members
+## Segment member export moved
 
-A practical first workflow: export members of one segment you can see in the Marketing Cloud Next UI.
-
-### Choose the segment
-
-In the UI, copy the segment **display name**, or open the segment and copy its **Id** from the browser URL. Prefer those over the API/developer name — that name is usually hard to find in the GUI. `--segment` also accepts the API name when you already have it.
-
-### Basic export
-
-Omit `--output-file` to write under `./data/<dataspace-name>/<segmentname>-<datetime>.csv` (not the current working directory alone). With `--result-format json`, the default destination is `./data/<dataspace-name>/<segmentname>-<datetime>.json`. An explicit `--output-file` overrides that default.
-
-```bash
-sf mcnext segment members export --target-org my-mcnext-org --segment "Annual Promo"
-```
-
-Or by Id, with a chosen path:
-
-```bash
-sf mcnext segment members export --target-org my-mcnext-org --segment 1sg000000000001AAA --output-file members.csv
-```
-
-### Enriched details
-
-Add `--include-details` for a richer Unified Individual–style export. The command then uses the segment’s own data space automatically (that same data space also shapes the default `./data/<dataspace-name>/…` path). Pass `--data-space` only when you need to override that choice.
-
-```bash
-sf mcnext segment members export --target-org my-mcnext-org --segment "Annual Promo" --include-details
-```
-
-### When the display name is ambiguous
-
-If the same display name exists in more than one business unit or data space, either:
-
-- pass `--data-space` with the correct data space name, or
-- pass the segment **Id** instead of the display name, or
-- in an interactive terminal (TTY), answer the prompt that lists matching candidates.
-
-Without a TTY, or with `--json`, the command is non-interactive: it prints the candidate list with each segment’s Id and data space and exits nonzero so you can re-run with an Id or `--data-space`.
+Segment member export is no longer part of this plugin. Use `sf data360 segment members export` from [sf-plugin-data](https://www.npmjs.com/package/sf-plugin-data) instead (`sf plugins install sf-plugin-data`).
 
 ## Demo project
 
@@ -92,7 +56,6 @@ The [demo project](test/demo-project) is an imaginary result of retrieve-all, no
 | -------------------------------------- | ----------------------------------------------------------------------------- |
 | `sf mcnext list types`                 | [List capability types](#sf-mcnext-list-types)                                |
 | `sf mcnext retrieve all`               | [Bounded project retrieve](#sf-mcnext-retrieve-all)                           |
-| `sf mcnext segment members export`     | [Export segment members](#sf-mcnext-segment-members-export)                   |
 | `sf mcnext segment records export`     | [Export MarketSegment records](#sf-mcnext-segment-records-export)             |
 | `sf mcnext segment definition create`  | [Create a segment definition](#sf-mcnext-segment-definition-create)           |
 | `sf mcnext identity-resolution list`   | [List identity-resolution rulesets](#sf-mcnext-identity-resolution-list)      |
@@ -124,14 +87,6 @@ Downloads bounded best-available working files into one existing Salesforce DX p
 
 ```bash
 sf mcnext retrieve all --target-org my-mcnext-org --expected-org-id 00D000000000001AAA --project-dir ./project --api-version 67.0 --wait 10 --json
-```
-
-## `sf mcnext segment members export`
-
-Resolves one segment and exports computed member rows. Prefer the **display name** or **Id** from the UI; the API name is also accepted. Without `--output-file`, the CSV lands at `./data/<dataspace-name>/<segmentname>-<datetime>.csv`; `--result-format json` uses `./data/<dataspace-name>/<segmentname>-<datetime>.json`. See [Export segment members](#export-segment-members) for enriched mode, data-space defaults, and ambiguity handling.
-
-```bash
-sf mcnext segment members export --target-org my-mcnext-org --segment "Annual Promo"
 ```
 
 ## `sf mcnext segment records export`

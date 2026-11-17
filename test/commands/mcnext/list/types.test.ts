@@ -24,8 +24,8 @@ describe('mcnext list types', () => {
 
   it('filters MCN-owned capabilities with explicit support boundaries', async () => {
     const result = await ListTypes.run(['--provider', 'mcnext']);
-    expect(result.length).to.equal(7);
-    expect(result.filter((row) => row.state === 'implemented').length).to.equal(7);
+    expect(result.length).to.equal(6);
+    expect(result.filter((row) => row.state === 'implemented').length).to.equal(6);
     expect(result.find((row) => row.name === 'identityResolution')?.operations).to.deep.equal([
       'list',
       'retrieve',
