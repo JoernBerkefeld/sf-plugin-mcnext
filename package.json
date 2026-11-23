@@ -86,6 +86,8 @@
     "test:only": "wireit",
     "test:package-parser": "wireit",
     "test:package": "node scripts/verify-package-lifecycle.mjs",
+    "verify:own-dependencies-latest": "node scripts/verify-own-dependencies-latest.mjs",
+    "preversion": "npm run verify:own-dependencies-latest",
     "version": "oclif readme"
   },
   "publishConfig": {
