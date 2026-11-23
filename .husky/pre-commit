@@ -11,4 +11,4 @@ node scripts/check-lockfile-registry-only.mjs || {
   exit 1
 }
 
-yarn lint && yarn pretty-quick --staged
+npm run lint && npx pretty-quick --staged

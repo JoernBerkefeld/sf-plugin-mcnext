@@ -5,4 +5,4 @@ export NO_COLOR=1
 
 . "$(dirname "$0")/_/husky.sh"
 
-yarn build && yarn test
+npm run build && npm test
