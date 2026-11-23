@@ -4,101 +4,148 @@
 name: Publish NPM on Release
 
 on:
-    release:
-        types: [published]
+  release:
+    types: [published]
 
 permissions:
-    id-token: write # Required for OIDC
-    contents: read
+  id-token: write # Required for OIDC
+  contents: read
 
 jobs:
-    build:
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v6
-            - uses: actions/setup-node@v6
-              with:
-                  node-version: 24
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
 
-            - run: npm ci --no-workspaces
-            - run: npm run lint
-            - run: npm test
+      - run: npm ci --no-workspaces
+      # Release-only network check: our own packages must be the newest published versions.
+      - name: Verify own packages are the newest published versions
+        run: npm run verify:own-dependencies-latest
+      - run: npm run lint
+      - run: npm test
 
-    publish-npm:
-        needs: build
-        runs-on: ubuntu-latest
-        steps:
-            - uses: actions/checkout@v6
-            - uses: actions/setup-node@v6
-              with:
-                  node-version: 24
-                  registry-url: https://registry.npmjs.org/
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org/
 
-            - run: npm ci --no-workspaces
+      - run: npm ci --no-workspaces
 
-            # Publish only when this exact version is not already on npm. This keeps the
-            # workflow (and therefore the GitHub Release) green when a release is (re)published
-            # for a version that was already uploaded, instead of failing on EPUBLISHCONFLICT.
-            - name: Publish to npm (skip if version already exists)
-              run: |
-                  set -euo pipefail
-                  pkg_name="$(node -p "require('./package.json').name")"
-                  pkg_version="$(node -p "require('./package.json').version")"
-                  if npm view "${pkg_name}@${pkg_version}" version >/dev/null 2>&1; then
-                    echo "::notice::${pkg_name}@${pkg_version} is already published on npm — skipping npm publish."
-                  else
-                    npm publish
-                  fi
+      - name: Verify release tag matches package version
+        shell: bash
+        run: test "$GITHUB_REF_NAME" = "v$(node -p "require('./package.json').version")"
+      # Publish only when this exact version is not on npm yet, so a GitHub Release for a
+      # version that is already published (e.g. the manual first release) stays green.
+      # Only a JSON E404 counts as "not published"; any other lookup failure fails the step.
+      # A package that does not exist at all is never published from here (manual bootstrap).
+      - name: Publish exact version or skip if already published
+        shell: bash
+        run: |
+          node <<'NODE'
+          const assert = require('node:assert/strict');
+          const { spawnSync } = require('node:child_process');
+          const pkg = require('./package.json');
+          assert.equal(pkg.name, 'sf-plugin-mcnext');
+          const registry = '--registry=https://registry.npmjs.org/';
+          const spec = `${pkg.name}@${pkg.version}`;
 
-            - name: Close release milestone if empty
-              env:
-                  GH_TOKEN: ${{ github.token }}
-                  REPO: ${{ github.repository }}
-                  RELEASE_TAG: ${{ github.event.release.tag_name }}
-              run: |
-                  set -euo pipefail
+          function npm(args) {
+              const result = spawnSync('npm', args, { encoding: 'utf8' });
+              if (result.error) throw result.error;
+              if (result.signal) throw new Error(`npm terminated by ${result.signal}`);
+              return result;
+          }
 
-                  owner="${REPO%%/*}"
-                  repo="${REPO##*/}"
+          function lookup(specification, field, expected) {
+              const result = npm(['view', specification, field, '--json', registry, '--prefer-online']);
+              if (result.status === 0) {
+                  assert.equal(JSON.parse(result.stdout), expected, 'Registry returned a different identity');
+                  return true;
+              }
+              for (const output of [result.stdout, result.stderr]) {
+                  let data;
+                  try {
+                      data = JSON.parse(output);
+                  } catch {
+                      continue; // Plain-text diagnostics never prove registry absence.
+                  }
+                  if (data?.error?.code === 'E404') return false;
+                  if (data?.error) break;
+              }
+              throw new Error(`Registry lookup failed for ${specification}:\n${result.stdout}\n${result.stderr}`);
+          }
 
-                  milestone_title="${RELEASE_TAG#v}"
+          if (lookup(spec, 'version', pkg.version)) {
+              console.log(`::notice::${spec} is already published; skipping npm publish.`);
+          } else {
+              if (!lookup(pkg.name, 'name', pkg.name)) {
+                  throw new Error('The first package publication must be performed manually by the user; hosted bootstrap is prohibited.');
+              }
+              const result = npm(['publish', '--json', '--no-workspaces', '--access', 'public', '--provenance', registry]);
+              process.stdout.write(result.stdout);
+              process.stderr.write(result.stderr);
+              assert.equal(result.status, 0, `npm publish failed for ${spec}; do not retry publication automatically.`);
+              console.log(`::notice::npm accepted ${spec} at ${new Date().toISOString()}`);
+          }
+          NODE
 
-                  if [ -z "${milestone_title}" ]; then
-                    echo "Could not parse milestone version from release tag (tag=${RELEASE_TAG})."
-                    exit 0
-                  fi
+      - name: Close release milestone if empty
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
 
-                  milestones_json="$(gh api "repos/${owner}/${repo}/milestones?state=open&per_page=100")"
+          owner="${REPO%%/*}"
+          repo="${REPO##*/}"
 
-                  milestone_number="$(echo "$milestones_json" | jq -r \
-                    --arg milestone_title "$milestone_title" \
-                    '($milestone_title | gsub("\\."; "\\\\.")) as $escaped_milestone_title
-                    | .[]
-                    | select(.title | test("^" + $escaped_milestone_title + "($|[ :a-z0-9-])"))
-                    | .number' \
-                    | head -n1)"
+          milestone_title="${RELEASE_TAG#v}"
 
-                  if [ -z "${milestone_number}" ] || [ "${milestone_number}" = "null" ]; then
-                    echo "No matching open milestone found for parsed version '${milestone_title}'."
-                    exit 0
-                  fi
+          if [ -z "${milestone_title}" ]; then
+            echo "Could not parse milestone version from release tag (tag=${RELEASE_TAG})."
+            exit 0
+          fi
 
-                  milestone="$(gh api "repos/${owner}/${repo}/milestones/${milestone_number}")"
-                  state="$(echo "$milestone" | jq -r '.state')"
-                  open_issues="$(echo "$milestone" | jq -r '.open_issues')"
-                  title="$(echo "$milestone" | jq -r '.title')"
+          milestones_json="$(gh api "repos/${owner}/${repo}/milestones?state=open&per_page=100")"
 
-                  echo "Matched milestone #${milestone_number} '${title}' (state=${state}, open_issues=${open_issues})."
+          milestone_number="$(echo "$milestones_json" | jq -r \
+            --arg milestone_title "$milestone_title" \
+            '($milestone_title | gsub("\\."; "\\\\.")) as $escaped_milestone_title
+            | .[]
+            | select(.title | test("^" + $escaped_milestone_title + "($|[ :a-z0-9-])"))
+            | .number' \
+            | head -n1)"
 
-                  if [ "$state" != "open" ]; then
-                    echo "Milestone is already closed. Nothing to do."
-                    exit 0
-                  fi
+          if [ -z "${milestone_number}" ] || [ "${milestone_number}" = "null" ]; then
+            echo "No matching open milestone found for parsed version '${milestone_title}'."
+            exit 0
+          fi
 
-                  if [ "$open_issues" -ne 0 ]; then
-                    echo "Milestone has open items. Skipping close."
-                    exit 0
-                  fi
+          milestone="$(gh api "repos/${owner}/${repo}/milestones/${milestone_number}")"
+          state="$(echo "$milestone" | jq -r '.state')"
+          open_issues="$(echo "$milestone" | jq -r '.open_issues')"
+          title="$(echo "$milestone" | jq -r '.title')"
 
-                  gh api -X PATCH "repos/${owner}/${repo}/milestones/${milestone_number}" -f state="closed" >/dev/null
-                  echo "Milestone #${milestone_number} closed."
+          echo "Matched milestone #${milestone_number} '${title}' (state=${state}, open_issues=${open_issues})."
+
+          if [ "$state" != "open" ]; then
+            echo "Milestone is already closed. Nothing to do."
+            exit 0
+          fi
+
+          if [ "$open_issues" -ne 0 ]; then
+            echo "Milestone has open items. Skipping close."
+            exit 0
+          fi
+
+          gh api -X PATCH "repos/${owner}/${repo}/milestones/${milestone_number}" -f state="closed" >/dev/null
+          echo "Milestone #${milestone_number} closed."
