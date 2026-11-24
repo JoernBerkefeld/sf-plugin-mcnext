@@ -29,14 +29,14 @@ const bashBlocks = (section: string): string[] =>
 const tableCommandCell = (id: string): string => `\`sf ${id.replaceAll(':', ' ')}\``;
 
 describe('README public command coverage', () => {
-  it('registers CMS as both a runtime dependency and an oclif plugin', async () => {
+  it('uses CMS as a library dependency without bundling its commands', async () => {
     const packageJson = JSON.parse(await readProjectFile('package.json')) as {
       dependencies?: Record<string, string>;
       oclif?: { plugins?: string[] };
     };
 
     expect(packageJson.dependencies?.['sf-plugin-cms']).to.be.a('string').and.not.be.empty;
-    expect(packageJson.oclif?.plugins).to.deep.equal(['sf-plugin-cms']);
+    expect(packageJson.oclif?.plugins).to.equal(undefined);
   });
 
   it('documents every manifest command in the reference table, a section, and a shell-safe bash example', async () => {
@@ -71,10 +71,11 @@ describe('README public command coverage', () => {
     }
   });
 
-  it('documents that CMS installs with the plugin', async () => {
+  it('documents that the sf cms and sf data360 commands need their own plugins', async () => {
     const readme = await readProjectFile('README.md');
 
-    expect(readme).to.include('also installs the compatible CMS plugin');
-    expect(readme).to.include('do not need a separate CMS install step');
+    expect(readme).to.include('adds the `sf mcnext` commands only');
+    expect(readme).to.include('https://www.npmjs.com/package/sf-plugin-cms');
+    expect(readme).to.include('https://www.npmjs.com/package/sf-plugin-data');
   });
 });

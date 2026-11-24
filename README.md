@@ -2,7 +2,7 @@
 
 Salesforce CLI plugin for Marketing Cloud Next. It retrieves, deploys and deletes campaigns and flows, and it runs one retrieve, deploy or delete across campaigns, flows, CMS content and Data 360 components by handing the CMS and Data 360 parts to `sf-plugin-cms` and `sf-plugin-data`.
 
-Installing this plugin also installs the compatible CMS plugin (`sf-plugin-cms`); you do not need a separate CMS install step.
+This plugin adds the `sf mcnext` commands only. For the `sf cms` and `sf data360` commands, install [sf-plugin-cms](https://www.npmjs.com/package/sf-plugin-cms) and [sf-plugin-data](https://www.npmjs.com/package/sf-plugin-data) as well.
 
 - [Install and sign in](#installation-and-getting-started)
 - [Command reference](#command-reference)

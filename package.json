@@ -56,7 +56,6 @@
   "oclif": {
     "commands": "./lib/commands",
     "bin": "sf",
-    "plugins": ["sf-plugin-cms"],
     "topicSeparator": " ",
     "devPlugins": ["@oclif/plugin-help"],
     "topics": {
