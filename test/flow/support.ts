@@ -165,10 +165,8 @@ export async function removeTempFolders(): Promise<void> {
   const root = await realpath(tmpdir());
   for (const [folder, marker] of created) {
     // eslint-disable-next-line no-await-in-loop -- a handful of folders
-    const owned =
-      dirname(folder) === root &&
-      basename(folder).startsWith(PREFIX) &&
-      (await readFile(join(folder, MARKER), 'utf8')) === marker;
+    const found = await readFile(join(folder, MARKER), 'utf8');
+    const owned = dirname(folder) === root && basename(folder).startsWith(PREFIX) && found === marker;
     // eslint-disable-next-line no-await-in-loop -- a handful of folders
     if (owned) await rm(folder, { recursive: true, force: true });
     created.delete(folder);
