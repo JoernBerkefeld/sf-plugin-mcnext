@@ -12,14 +12,14 @@ import {
   createRunOwnedTemp,
   removeRunOwnedPath,
   removeRunOwnedRoot,
-} from '../lib/filesystem/runOwnedTemp.js';
+} from './run-owned-temp.mjs';
 
 const packageRoot = resolve(import.meta.dirname, '..');
-const filename = join(packageRoot, 'src/capabilities/dependencyGraph.ts');
+const filename = join(packageRoot, 'src/business-units.ts');
 const config = {
   cwd: packageRoot,
   extension: ['.ts'],
-  include: ['src/capabilities/dependencyGraph.ts'],
+  include: ['src/business-units.ts'],
   exclude: [],
   esModules: true,
   produceSourceMap: true,
@@ -82,7 +82,7 @@ test('loader delegates first, filters resolved eligibility, preserves maps/setti
   }
 });
 
-test('real dependencyGraph ESM tests collect original TS coverage and enforce 50/99 thresholds', async () => {
+test('real business-units ESM tests collect original TS coverage and enforce 50/99 thresholds', async () => {
   const run = await createRunOwnedTemp('sf-mcnext-esm-coverage-test');
   const children = [];
   try {
@@ -103,7 +103,7 @@ test('real dependencyGraph ESM tests collect original TS coverage and enforce 50
         '--extension',
         '.ts',
         '--include',
-        'src/capabilities/dependencyGraph.ts',
+        'src/business-units.ts',
         '--produce-source-map',
         '--es-modules',
         '--check-coverage',
@@ -128,13 +128,14 @@ test('real dependencyGraph ESM tests collect original TS coverage and enforce 50
         '600000',
         '--reporter',
         'spec',
-        'test/capabilities/dependencyGraph.test.ts',
+        'test/business-units.test.ts',
       ],
       { cwd: packageRoot, encoding: 'utf8', timeout: 120_000 }
     );
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stdout, /7 passing/u);
+    assert.match(result.stdout, /\b[1-9]\d* passing/u);
+    assert.doesNotMatch(result.stdout, /\d+ failing/u);
     const nyc = new NYC({ ...config, tempDir: raw, reportDir: report, clean: false, cache: false });
     const map = await nyc.getCoverageMapFromAllCoverageFiles();
     assert.deepEqual(
@@ -149,7 +150,7 @@ test('real dependencyGraph ESM tests collect original TS coverage and enforce 50
     );
     assert.ok(
       Object.values(coverage.data.statementMap).some((location) =>
-        originalLines[location.start.line - 1].includes('assertPortableIdentity(identity)')
+        originalLines[location.start.line - 1].includes('const dataSpaceNames = await readDataSpaceNames(connection);')
       )
     );
     for (const metric of ['lines', 'statements', 'functions', 'branches']) {

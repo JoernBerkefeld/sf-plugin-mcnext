@@ -7,7 +7,7 @@ import {
   createRunOwnedTemp,
   removeRunOwnedPath,
   removeRunOwnedRoot,
-} from '../../src/filesystem/runOwnedTemp.js';
+} from '../../scripts/run-owned-temp.mjs';
 
 const MARKER = '.sf-mcnext-run-owner.json';
 

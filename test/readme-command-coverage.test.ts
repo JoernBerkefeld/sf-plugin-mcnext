@@ -47,12 +47,17 @@ describe('README public command coverage', () => {
     const manifest = JSON.parse(manifestText) as Manifest;
     const commands = Object.values(manifest.commands);
 
-    expect(commands).to.have.length(16);
     expect(readme).to.include('## Command reference');
     expect(readme).to.include('sf mcnext <command> --help');
 
     const reference = readme.split('## Command reference\n')[1].split('\n## ')[0];
     const tableCommands = [...reference.matchAll(/^\|\s*(`sf [^`\n]+`)\s*\|/gmu)].map((match) => match[1]);
+    const sectionHeadings = [...readme.matchAll(/^## (`sf [^`\n]+`)$/gmu)].map((match) => match[1]);
+    const expectedCells = commands.map((command) => tableCommandCell(command.id)).sort();
+
+    // Both directions: every command is documented, and nothing is documented that does not exist.
+    expect([...tableCommands].sort(), 'command reference table rows').to.deep.equal(expectedCells);
+    expect([...sectionHeadings].sort(), 'command sections').to.deep.equal(expectedCells);
 
     for (const command of commands) {
       expect(tableCommands, `${command.id} command reference table row`).to.include(tableCommandCell(command.id));
@@ -71,15 +76,5 @@ describe('README public command coverage', () => {
 
     expect(readme).to.include('also installs the compatible CMS plugin');
     expect(readme).to.include('do not need a separate CMS install step');
-    expect(readme).not.to.include('Imaginary retrieve-all');
-  });
-
-  it('points segment member export users to sf-plugin-data', async () => {
-    const readme = await readProjectFile('README.md');
-
-    expect(readme).to.include('## Segment member export moved');
-    expect(readme).to.include('`sf data360 segment members export`');
-    expect(readme).to.include('sf plugins install sf-plugin-data');
-    expect(readme).not.to.include('sf mcnext segment members export');
   });
 });

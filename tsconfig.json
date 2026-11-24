@@ -5,7 +5,10 @@
     "rootDir": "src",
     // @salesforce/core 9.0.0 ships a .d.ts referencing pino's TransportSingleOptions,
     // which pino 9.14 removed. Our own sources remain fully type-checked.
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // sf-plugins-core 13 brings its own @oclif/core, so the flag types of a command cannot be named
+    // in a declaration file (TS2742). Nothing imports this package's types: it exports commands only.
+    "declaration": false
   },
   "include": ["./src/**/*.ts"]
 }

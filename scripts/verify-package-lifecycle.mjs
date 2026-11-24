@@ -4,6 +4,12 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { basename, join, resolve } from 'node:path';
 import { parseNpmPackOutput } from './parse-npm-pack-output.mjs';
+import {
+  createRunOwnedDirectory,
+  createRunOwnedTemp,
+  removeRunOwnedPath,
+  removeRunOwnedRoot,
+} from './run-owned-temp.mjs';
 
 const packageRoot = resolve(import.meta.dirname, '..');
 const npmCli = process.env.npm_execpath;
@@ -23,9 +29,6 @@ execFileSync(
     cwd: packageRoot,
     stdio: 'inherit',
   }
-);
-const { createRunOwnedDirectory, createRunOwnedTemp, removeRunOwnedPath, removeRunOwnedRoot } = await import(
-  '../lib/filesystem/runOwnedTemp.js'
 );
 const cleanupRun = await createRunOwnedTemp('sf-plugin-mcnext-package');
 const workDir = await createRunOwnedDirectory(cleanupRun, 'pack');
@@ -48,10 +51,6 @@ try {
   const entries = execFileSync('tar', ['-tf', tarball], { encoding: 'utf8' }).split(/\r?\n/u).filter(Boolean);
   const entrySet = new Set(entries);
 
-  assert.ok(
-    entries.some((entry) => entry.startsWith('package/lib/commands/')),
-    'compiled commands are missing'
-  );
   assert.ok(entrySet.has('package/lib/index.js'), 'package entry point is missing');
   assert.ok(entrySet.has('package/oclif.manifest.json'), 'oclif manifest is missing');
 
@@ -59,62 +58,27 @@ try {
   assert.ok(manifestText.trim().length > 2, 'oclif manifest is empty');
   const manifest = JSON.parse(manifestText);
   const commandIds = Object.keys(manifest.commands ?? {}).sort();
-  const expectedCommandIds = [
-    'mcnext:campaign:config',
-    'mcnext:data-graph:metadata',
-    'mcnext:email-template:show',
-    'mcnext:email:send-definition:show',
-    'mcnext:flow:association',
-    'mcnext:flow:source',
-    'mcnext:identity-resolution:export',
-    'mcnext:identity-resolution:list',
-    'mcnext:identity-resolution:plan',
-    'mcnext:identity-resolution:show',
-    'mcnext:list:types',
-    'mcnext:migration:cms',
-    'mcnext:migration:plan',
-    'mcnext:retrieve:all',
-    'mcnext:segment:definition:create',
-    'mcnext:segment:records:export',
-  ].sort();
-  assert.deepEqual(commandIds, expectedCommandIds, 'manifest public command IDs do not match the Phase 2 contract');
-  const retrieveAllCommand = manifest.commands['mcnext:retrieve:all'];
-  assert.deepEqual(retrieveAllCommand.aliases, ['mcn:retrieve:all'], 'retrieve all alias must remain available');
-  for (const flag of ['target-org', 'expected-org-id', 'project-dir']) {
-    assert.equal(retrieveAllCommand.flags[flag]?.required, true, `retrieve all requires explicit --${flag}`);
+  const expectedCommandIds = ['mcnext:delete', 'mcnext:deploy', 'mcnext:list:business-unit', 'mcnext:retrieve'];
+  assert.deepEqual(commandIds, expectedCommandIds, 'manifest public command IDs do not match the package contract');
+  for (const id of expectedCommandIds) {
+    const compiled = `package/lib/commands/${id.replaceAll(':', '/')}.js`;
+    assert.ok(entrySet.has(compiled), `compiled command is missing: ${compiled}`);
   }
-  assert.equal(retrieveAllCommand.flags['api-version']?.default, '67.0');
-  assert.equal(retrieveAllCommand.flags.wait?.type, 'option');
-  assert.equal(retrieveAllCommand.flags.wait?.default, 10);
+  const compiledCommands = entries.filter((entry) => /^package\/lib\/commands\/.*\.js$/u.test(entry));
+  assert.equal(compiledCommands.length, expectedCommandIds.length, 'package contains an unlisted compiled command');
 
-  execFileSync('tar', ['-xf', tarball, '-C', workDir, 'package/lib/registry/registry.js']);
-  const registryUrl = pathToFileURL(join(workDir, 'package', 'lib', 'registry', 'registry.js'));
-  const { MCN_TYPES } = await import(registryUrl.href);
-  const registryContract = Object.fromEntries(
-    MCN_TYPES.map((type) => [type.name, { operations: type.operations, provider: type.provider, state: type.state }])
-  );
+  // The packed code must load on its own: routing is the contract every command builds on.
+  for (const module of ['package/lib/envelope.js', 'package/lib/selectors.js']) {
+    assert.ok(entrySet.has(module), `${module} is missing`);
+    execFileSync('tar', ['-xf', tarball, '-C', workDir, module]);
+  }
+  const selectorsUrl = pathToFileURL(join(workDir, 'package', 'lib', 'selectors.js'));
+  const { DATA360_FAMILIES, areaOfType } = await import(selectorsUrl.href);
+  assert.equal(DATA360_FAMILIES.length, 10, 'packed selectors do not list the ten Data 360 families');
   assert.deepEqual(
-    registryContract,
-    {
-      listEmail: { operations: ['retrieve'], provider: 'core-sf', state: 'delegated' },
-      emailTemplate: { operations: ['retrieve'], provider: 'mcnext', state: 'implemented' },
-      campaign: { operations: ['retrieve', 'create', 'update'], provider: 'mcnext', state: 'implemented' },
-      dataGraph: { operations: ['retrieve'], provider: 'mcnext', state: 'implemented' },
-      identityResolution: {
-        operations: ['list', 'retrieve', 'export', 'plan'],
-        provider: 'mcnext',
-        state: 'implemented',
-      },
-      cmsContent: { operations: ['export', 'create'], provider: 'cms-service', state: 'conditional' },
-      flow: { operations: ['retrieve', 'create', 'update'], provider: 'mcnext', state: 'implemented' },
-      flowDefinition: { operations: ['retrieve', 'deploy'], provider: 'core-sf', state: 'delegated' },
-      flowTest: { operations: ['retrieve', 'deploy'], provider: 'core-sf', state: 'delegated' },
-      managedContentType: { operations: ['retrieve', 'deploy'], provider: 'core-sf', state: 'delegated' },
-      contentTypeBundle: { operations: ['retrieve', 'deploy'], provider: 'core-sf', state: 'delegated' },
-      marketSegmentDefinition: { operations: ['create'], provider: 'mcnext', state: 'implemented' },
-      marketSegmentRecord: { operations: ['export'], provider: 'core-sf', state: 'delegated' },
-    },
-    'registry contract does not match the Phase 2 package surface'
+    ['campaign', 'flow', 'segment', 'email'].map((type) => areaOfType(type)),
+    ['mcnext', 'mcnext', 'data360', 'cms'],
+    'packed selector routing does not match the package contract'
   );
 
   const forbidden = [
@@ -122,6 +86,9 @@ try {
     /^package\/(?:_mcnext-probe\.mjs|_probe-output)(?:\/|$)/u,
     /(?:^|\/)(?:\.env(?:\..*)?|.*credential.*|.*evidence.*)$/iu,
     /^package\/(?:mcp\.json|\.mcp\.json)$/u,
+    // Test and script support, such as the run-owned temp helper that starts powershell.exe, is never shipped.
+    /^package\/(?:scripts|test)(?:\/|$)/u,
+    /run-?owned-?temp/iu,
   ];
   const forbiddenEntries = entries.filter((entry) => forbidden.some((pattern) => pattern.test(entry)));
   assert.deepEqual(forbiddenEntries, [], `forbidden package content: ${forbiddenEntries.join(', ')}`);
@@ -129,7 +96,7 @@ try {
   const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
   assert.equal(packageJson.exports, './lib/index.js', 'package export must point to the compiled entry point');
   const cmsDependencyRange = packageJson.dependencies?.['sf-plugin-cms'];
-  assert.equal(cmsDependencyRange, '^0.11.0', 'CMS provider must target the qualified published info-v2 release');
+  assert.equal(cmsDependencyRange, '^0.26.0', 'CMS provider must target the release with the in-process API');
   assert.deepEqual(
     packageJson.oclif?.plugins,
     ['sf-plugin-cms'],

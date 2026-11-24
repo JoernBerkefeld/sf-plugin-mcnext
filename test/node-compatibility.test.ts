@@ -1,14 +1,15 @@
 import { readFile } from 'node:fs/promises';
 import { expect } from 'chai';
 
-const requiredNodeVersion = '>=22.19.0';
+const requiredNodeVersion = '^22.22.2 || ^24.15.0';
 
 type YamlLine = {
   indent: number;
   text: string;
 };
 
-const readProjectFile = async (path: string): Promise<string> => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
+const readProjectFile = async (path: string): Promise<string> =>
+  readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
 const yamlLines = (source: string): YamlLine[] =>
   source
@@ -25,7 +26,12 @@ const mappingBlock = (lines: YamlLine[], key: string, indent: number): YamlLine[
 };
 
 const childIndent = (block: YamlLine[]): number => {
-  const indent = Math.min(...block.slice(1).map((line) => line.indent).filter((value) => value > block[0].indent));
+  const indent = Math.min(
+    ...block
+      .slice(1)
+      .map((line) => line.indent)
+      .filter((value) => value > block[0].indent)
+  );
   expect(indent, `expected children under ${block[0].text}`).to.be.finite;
   return indent;
 };
@@ -81,9 +87,9 @@ describe('Node compatibility metadata', () => {
 
     expect(packageJson.engines.node).to.equal(requiredNodeVersion);
     expect(lockfile.packages[''].engines.node).to.equal(requiredNodeVersion);
-    expect(readme).to.include('Node.js `22.19.0` or later');
+    expect(readme).to.include('Node.js `22.22.2` or later on the 22 line, or `24.15.0` or later on the 24 line');
     expect(matrixNodeValues).to.have.length(1);
-    expect(parseInlineList(matrixNodeValues[0])).to.deep.equal(['22.19.0', '24']);
+    expect(parseInlineList(matrixNodeValues[0])).to.deep.equal(['22.22.2', '24']);
     const codeTestSetupNodeWith = mappingBlock(codeTestSetupNode, 'with', childIndent(codeTestSetupNode));
     expect(directValues(codeTestSetupNodeWith, 'node-version')).to.deep.equal(['${{ matrix.node }}']);
     expect(directValues(codeTestSetupNodeWith, 'node-version-file')).to.be.empty;

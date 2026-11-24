@@ -14,7 +14,7 @@ import {
   createRunOwnedTemp,
   removeRunOwnedPath,
   removeRunOwnedRoot,
-} from '../lib/filesystem/runOwnedTemp.js';
+} from './run-owned-temp.mjs';
 
 const packageRoot = resolve(import.meta.dirname, '..');
 const children = [];

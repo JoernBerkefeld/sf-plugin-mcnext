@@ -1,21 +1,22 @@
 # sf-plugin-mcnext
 
-Salesforce CLI plugin for inspecting, exporting, validating, or carefully moving selected Marketing Cloud Next configuration and data. It adds dedicated workflows where Marketing Cloud Next needs them and delegates to the core `sf` CLI where Salesforce CLI already provides the transport. It does **not** claim complete Marketing Cloud Next migration support.
+Salesforce CLI plugin for Marketing Cloud Next. It retrieves, deploys and deletes campaigns and flows, and it runs one retrieve, deploy or delete across campaigns, flows, CMS content and Data 360 components by handing the CMS and Data 360 parts to `sf-plugin-cms` and `sf-plugin-data`.
 
 Installing this plugin also installs the compatible CMS plugin (`sf-plugin-cms`); you do not need a separate CMS install step.
 
 - [Install and sign in](#installation-and-getting-started)
-- [Segment member export moved](#segment-member-export-moved)
 - [Command reference](#command-reference)
-- [Safety and limitations](#safety-and-limitations)
+- [Files in the project folder](#files-in-the-project-folder)
+- [Exit codes](#exit-codes)
+- [Not available yet](#not-available-yet)
 
 ## Installation and getting started
 
 ### Prerequisites
 
-- Node.js `22.19.0` or later.
+- Node.js `22.22.2` or later on the 22 line, or `24.15.0` or later on the 24 line.
 - The base Salesforce `sf` CLI.
-- An authorized Salesforce org with the Marketing Cloud Next or Data 360 features required by the command you run.
+- An authorized Salesforce org with Marketing Cloud Next.
 
 ```bash
 npm install --global @salesforce/cli
@@ -31,186 +32,164 @@ sf org display --target-org my-mcnext-org
 
 For a sandbox or custom login host, add `--instance-url` to `sf org login web`.
 
-Normal Salesforce CLI org authorization covers every org-backed command in this plugin. Only `sf mcnext data-graph metadata` uses an externally obtained Data 360 token and tenant URL.
-
 ### Install the plugin
 
 ```bash
 sf plugins install sf-plugin-mcnext
-sf mcnext list types
+sf mcnext --help
 ```
 
-If Salesforce CLI asks whether you trust this unsigned plugin, check the package name before confirming. The hidden `mcn` topic is a short alias for `mcnext`; this README uses canonical `mcnext` names. Run `sf mcnext <command> --help` for current flags.
+If Salesforce CLI asks whether you trust this unsigned plugin, check the package name before confirming.
 
-## Segment member export moved
+### First steps
 
-Segment member export is no longer part of this plugin. Use `sf data360 segment members export` from [sf-plugin-data](https://www.npmjs.com/package/sf-plugin-data) instead (`sf plugins install sf-plugin-data`).
+```bash
+sf mcnext list business-unit --target-org my-mcnext-org
+sf mcnext retrieve --target-org my-mcnext-org --business-unit defaultBusinessUnit
+```
 
-## Demo project
-
-The [demo project](test/demo-project) is an imaginary result of retrieve-all, not import-ready source. Its [artifact inventory](test/fixtures/demo-project/inventory.json) and [marketing-type coverage](test/fixtures/demo-project/marketing-type-coverage.json) distinguish existing formats from proposed layouts and unresolved providers.
+The first command shows the business units of the org. The second writes everything of one business unit into the current folder. In an org that does not use business units, run `sf mcnext retrieve --target-org my-mcnext-org` for the campaigns and flows.
 
 ## Command reference
 
-| Command                                | Details                                                                       |
-| -------------------------------------- | ----------------------------------------------------------------------------- |
-| `sf mcnext list types`                 | [List capability types](#sf-mcnext-list-types)                                |
-| `sf mcnext retrieve all`               | [Bounded project retrieve](#sf-mcnext-retrieve-all)                           |
-| `sf mcnext segment records export`     | [Export MarketSegment records](#sf-mcnext-segment-records-export)             |
-| `sf mcnext segment definition create`  | [Create a segment definition](#sf-mcnext-segment-definition-create)           |
-| `sf mcnext identity-resolution list`   | [List identity-resolution rulesets](#sf-mcnext-identity-resolution-list)      |
-| `sf mcnext identity-resolution show`   | [Show one ruleset](#sf-mcnext-identity-resolution-show)                       |
-| `sf mcnext identity-resolution export` | [Export one ruleset](#sf-mcnext-identity-resolution-export)                   |
-| `sf mcnext identity-resolution plan`   | [Plan identity-resolution create/update](#sf-mcnext-identity-resolution-plan) |
-| `sf mcnext email send-definition show` | [Show a ListEmail record](#sf-mcnext-email-send-definition-show)              |
-| `sf mcnext email-template show`        | [Show a CMS email template](#sf-mcnext-email-template-show)                   |
-| `sf mcnext data-graph metadata`        | [Read Data Graph metadata](#sf-mcnext-data-graph-metadata)                    |
-| `sf mcnext flow source`                | [Retrieve or mutate Flow source](#sf-mcnext-flow-source)                      |
-| `sf mcnext flow association`           | [Plan or attach Flow to Campaign](#sf-mcnext-flow-association)                |
-| `sf mcnext campaign config`            | [Export or mutate Campaign config](#sf-mcnext-campaign-config)                |
-| `sf mcnext migration plan`             | [Write a migration assessment](#sf-mcnext-migration-plan)                     |
-| `sf mcnext migration cms`              | [Run bounded CMS migration steps](#sf-mcnext-migration-cms)                   |
+Use `sf mcnext <command> --help` for the full flag list. Every command takes `--target-org` / `-o`. Add `--json` for machine-readable output; its top-level `status` is the exit code.
 
-Use `sf mcnext <command> --help` for the full flag list. Most org-backed commands take `--target-org` / `-o`. Add `--json` for machine-readable output.
+| Command                        | What it does                                                      |
+| ------------------------------ | ----------------------------------------------------------------- |
+| `sf mcnext list business-unit` | Lists the business units with their data space and CMS workspaces |
+| `sf mcnext retrieve`           | Retrieves campaigns and flows, or everything of one business unit |
+| `sf mcnext deploy`             | Deploys CMS content, campaigns and flows in one run               |
+| `sf mcnext delete`             | Deletes flows, campaigns and CMS content in one run               |
 
-## `sf mcnext list types`
+Components are named with `--metadata` / `-m` as `type:Name`:
 
-Lists capability ownership, support state, and limitations without contacting an org.
+- `campaign` and `flow` are handled by this plugin. A campaign is named by its name, a flow by its API name.
+  - In an org with business units, a campaign name stands for one campaign per business unit, plus one campaign without a business unit. Two business units can each have a campaign called `Spring`.
+  - In an org without business units, the name alone identifies the campaign.
+- `dlo`, `dmo`, `mapping`, `relationship`, `data-stream`, `data-transform`, `data-graph`, `segment`, `identity-resolution` and `calculated-insight` are Data 360 types.
+- Every other type, such as `email`, is a CMS type.
+
+`sf mcnext deploy` and `sf mcnext delete` also take `--source-dir` / `-d` with a file or folder below `cms/` or `mcnext/`.
+
+## `sf mcnext list business-unit`
+
+Shows each business unit with its developer name, label, data space and the API names of its CMS workspaces.
 
 ```bash
-sf mcnext list types --provider core-sf
+sf mcnext list business-unit --target-org my-mcnext-org
+sf mcnext list business-unit --target-org my-mcnext-org --json
 ```
 
-## `sf mcnext retrieve all`
+In an org that does not use business units, the one business unit is listed with its data space, the workspaces are not available per business unit, and a warning says so.
 
-Downloads bounded best-available working files into one existing Salesforce DX project. This is not a full backup or restore kit; results report `complete:false`.
+## `sf mcnext retrieve`
+
+- Without `--metadata` and without `--business-unit`: every campaign and every marketing flow of the org.
+- With `--business-unit`: the campaigns of that business unit, the flows and the Data 360 components of its data space, and the content of its CMS workspaces. Nothing of other data spaces or workspaces. A flow named with `--metadata` that exists in another data space is reported as failed (`FLOW_OTHER_DATASPACE`).
+- With `--metadata`: only the named components. A Data 360 component is read from `--dataspace` (default: `default`). A CMS component needs `--workspace` or `--business-unit`.
+- A campaign of a business unit is written to `mcnext/campaigns/<business unit>/`, a campaign without a business unit to `mcnext/campaigns/`. `--metadata campaign:Spring` retrieves every campaign of that name, each into its own folder.
+- `--output-dir` names the project folder; the default is the current folder.
+- Existing files are replaced. Use Git to see what changed.
 
 ```bash
-sf mcnext retrieve all --target-org my-mcnext-org --expected-org-id 00D000000000001AAA --project-dir ./project --api-version 67.0 --wait 10 --json
+sf mcnext retrieve --target-org my-mcnext-org
+sf mcnext retrieve --target-org my-mcnext-org --business-unit defaultBusinessUnit --output-dir my-project
+sf mcnext retrieve --target-org my-mcnext-org --metadata campaign:Spring --metadata flow:Welcome_Flow
+sf mcnext retrieve --target-org my-mcnext-org --metadata segment:My_Segment --dataspace default
+sf mcnext retrieve --target-org my-mcnext-org --metadata email:Welcome --workspace Default_Content_Workspace
 ```
 
-## `sf mcnext segment records export`
+## `sf mcnext deploy`
 
-Delegates a `MarketSegment` bulk export to core `sf data export bulk`.
+Deploys from the current folder in this order: CMS content, campaigns, flows, and for each flow its link to a campaign.
+
+- Every component is checked before anything is written. If one is blocked, nothing is written.
+- A flow needs its emails, its campaign and its segment in the org. Content and campaigns of the same run count.
+- `--preview` stops after the check and shows what would happen.
+- The run stops at the first component that fails. Components after it are reported as `not-attempted`.
+- A flow file whose status is `Active` is refused without `--allow-activation`, because deploying it starts the flow.
+- A CMS component goes to the workspace of its `cms/<workspace>/` folder, or to `--workspace`.
+- A bare `campaign` or `flow` means every file of that type in the project folder.
+- A campaign file is deployed to the business unit it names, and to no business unit when it names none. The campaign of that name is looked up there only: it is updated when it exists and created when it does not. A campaign of the same name elsewhere is left alone.
+- `--metadata campaign:Spring` selects every file of that name: the one in `mcnext/campaigns/` and the ones in the business unit folders. Use `--source-dir` with a file to deploy just one.
+- A campaign file whose folder and `businessUnit` disagree is blocked (`CAMPAIGN_FILE_INVALID`).
+- A parent campaign is looked up in the campaign's own business unit first. If none is there, the one campaign of that name in the org is used.
+- A flow is attached to the campaign of its name in the business unit that owns the flow's data space. If none is there, the campaign of that name without a business unit is used. A campaign of another business unit is never used.
 
 ```bash
-sf mcnext segment records export --target-org my-mcnext-org --output-file segments.csv
+sf mcnext deploy --target-org my-mcnext-org --source-dir mcnext --metadata email:Welcome --preview
+sf mcnext deploy --target-org my-mcnext-org --metadata email:Welcome --metadata campaign:Spring --metadata flow:Welcome_Flow
 ```
 
-## `sf mcnext segment definition create`
-
-Strictly creates one mapped `MarketSegmentDefinition`. Use `--dry-run` before applying.
+Copy into another business unit with `--business-unit`: campaigns get that business unit, flows get its data space, its segment and its CMS workspace, and CMS content goes to its workspace. A copied campaign keeps its name and becomes a new campaign in the target business unit; the original stays as it is. Run the same command again to update the copy. If the business unit has several workspaces and none is named like the source workspace, name one with `--workspace`. `--allow-cross-dataspace` lets CMS content that uses another data space be renamed into the target data space.
 
 ```bash
-sf mcnext segment definition create --source-org source-mcn --target-org target-mcn --expected-source-org-id 00D000000000001AAA --expected-target-org-id 00D000000000002AAA --project-dir ./project --source-file force-app/main/default/marketSegmentDefinitions/FreshSegment.marketSegmentDefinition-meta.xml --member FreshSegment --mapping-file mappings/segment.json --dry-run
+sf mcnext deploy --target-org my-mcnext-org --metadata campaign:Spring --metadata flow:Welcome_Flow --metadata email:Welcome --business-unit otherBusinessUnit --allow-cross-dataspace
 ```
 
-## `sf mcnext identity-resolution list`
+## `sf mcnext delete`
 
-Lists identity-resolution ruleset configurations. It does not export unified-profile rows.
+Deletes in this order: flows, campaigns, CMS content.
+
+- Needs `--confirm-delete`. Without it, only `--preview` runs, and it deletes nothing.
+- Every component is checked before anything is deleted. If one is blocked, nothing is deleted.
+- A flow with an active version is blocked. Deactivate it in Salesforce first.
+- A name that several records share is blocked.
+- `--metadata campaign:Spring` deletes the campaign of the business unit that the local file of that name belongs to.
+  - Several local files of that name: the delete is blocked (`CAMPAIGN_NAME_AMBIGUOUS`). Select the file with `--source-dir`.
+  - No local file and exactly one campaign of that name in the org: that campaign is deleted, whatever its business unit.
+  - No local file and several campaigns of that name in the org: the delete is blocked (`CAMPAIGN_NAME_AMBIGUOUS`). Retrieve the campaigns first, then select the file of the one to delete with `--source-dir`.
+  - A local file whose `name` is not the name given: the delete is blocked (`CAMPAIGN_FILE_INVALID`).
+- `--source-dir` with a campaign file deletes the campaign of that file's business unit.
+- The run stops at the first component that fails, is blocked or gets no answer. Components after it are reported as `not-attempted`.
+- Local files are removed only for a component that Salesforce confirmed as `deleted`:
+  - A component named with `--source-dir`: the file it was read from. For a flow, its `.flow.json` next to it as well.
+  - A campaign or flow named with `--metadata`: its own file below `mcnext/campaigns/` or in `mcnext/flows/`.
+  - A component that the org does not have (`unchanged`), a blocked or failed one, and every component of a `--preview` keep their files.
+  - `--keep-local-files` keeps all files.
 
 ```bash
-sf mcnext identity-resolution list --target-org my-mcnext-org --api-version 67.0
+sf mcnext delete --target-org my-mcnext-org --metadata flow:Welcome_Flow --metadata campaign:Spring --preview
+sf mcnext delete --target-org my-mcnext-org --metadata flow:Welcome_Flow --metadata campaign:Spring --confirm-delete
+sf mcnext delete --target-org my-mcnext-org --metadata email:Welcome --workspace Default_Content_Workspace --confirm-delete --keep-local-files
 ```
 
-## `sf mcnext identity-resolution show`
+## Files in the project folder
 
-Retrieves one ruleset configuration by Salesforce ruleset ID.
-
-```bash
-sf mcnext identity-resolution show --target-org my-mcnext-org --ruleset-id 1ir000000000001AAA --api-version 67.0
+```text
+mcnext/
+  campaigns/
+    <Name>.campaign.json        one campaign without a business unit: its fields, and parent and brief by name
+    <BusinessUnit>/
+      <Name>.campaign.json      one campaign of that business unit; the file names the business unit as well
+  flows/
+    <ApiName>.flow-meta.xml     the flow; its segment is written as API name
+    <ApiName>.flow.json         the campaign the flow belongs to, and what the flow needs
+cms/
+  <workspace>/<type>/           CMS content, written and read by sf-plugin-cms
+data360/                        Data 360 components, written by sf-plugin-data
 ```
 
-## `sf mcnext identity-resolution export`
+`<BusinessUnit>` is the developer name of the business unit. The `businessUnit` inside a campaign file decides where the campaign goes; the folder has to match it. In an org without business units all campaign files are in `mcnext/campaigns/`.
 
-Writes one complete ruleset configuration as JSON.
+No record IDs of the org are stored in the campaign and flow files, so the same files deploy to another org.
 
-```bash
-sf mcnext identity-resolution export --target-org my-mcnext-org --ruleset-id 1ir000000000001AAA --output-file identity-resolution.json --api-version 67.0
-```
+## Exit codes
 
-## `sf mcnext identity-resolution plan`
+| Code | Meaning                                                                          |
+| ---- | -------------------------------------------------------------------------------- |
+| 0    | Every selected component succeeded or was unchanged                              |
+| 1    | Something failed, was blocked or has an unknown outcome, and nothing was written |
+| 68   | At least one component was written and at least one other failed                 |
+| 69   | Nothing failed, but Salesforce is still working on a component                   |
 
-Builds a GET-only CREATE plan or UPDATE shell. It never sends a mutation request.
+With `--json`, `status` holds the same number, `items` lists every component with its outcome, and `areas` holds the unchanged results of `sf-plugin-data` and `sf-plugin-cms` (`areas.cms` is a list with one result per workspace).
 
-```bash
-sf mcnext identity-resolution plan --intent create --source-org source-mcn --target-org target-mcn --expected-source-org-id 00D000000000001AAA --expected-target-org-id 00D000000000002AAA --input-file identity-resolution-plan.json --api-version 67.0
-```
+## Not available yet
 
-## `sf mcnext email send-definition show`
-
-Reads one `ListEmail` record through core `sf data get record`. It does not publish or send email.
-
-```bash
-sf mcnext email send-definition show --target-org my-mcnext-org --record-id 0XB000000000001AAA --api-version 67.0
-```
-
-## `sf mcnext email-template show`
-
-Reads one CMS email template by managed content ID.
-
-```bash
-sf mcnext email-template show --target-org my-mcnext-org --content-id 20Y000000000001AAA --api-version 67.0
-```
-
-## `sf mcnext data-graph metadata`
-
-Performs one read-only Data Graph metadata GET. Supply a tenant URL and a private access-token file obtained outside this plugin.
-
-```bash
-sf mcnext data-graph metadata --instance-url https://example.c360a.salesforce.com --access-token-file "C:\private\data360-token.txt"
-```
-
-## `sf mcnext flow source`
-
-Retrieves or validates selected Flow source, or creates/updates one inactive same-org draft. It does not activate, execute, or send.
-
-```bash
-sf mcnext flow source --operation retrieve --member MyFlow --target-org my-mcnext-org --project-dir ./project
-```
-
-## `sf mcnext flow association`
-
-Plans or attaches one existing inactive Segment-triggered Flow to an inactive Campaign. This is a bounded attachment write, not Flow creation or activation.
-
-```bash
-sf mcnext flow association --operation plan --target-org target-mcn --expected-org-id 00D000000000002AAA --api-version 67.0 --project-dir ./project --input-file association-input.json --json
-```
-
-## `sf mcnext campaign config`
-
-Exports a describe-driven Campaign snapshot, or performs a bounded create/update with a separate mutation-shaped input file.
-
-```bash
-sf mcnext campaign config --operation export --target-org target-mcn --expected-org-id 00D000000000002AAA --api-version 67.0 --project-dir . --record-id 701000000000001AAA --output-file campaign.json
-```
-
-## `sf mcnext migration plan`
-
-Writes a deterministic, read-only source-to-target assessment. It does not deploy or mutate either org.
-
-```bash
-sf mcnext migration plan --source-org source-mcn --target-org target-mcn --output-file migration-plan.json
-```
-
-## `sf mcnext migration cms`
-
-Experimental bounded CMS execution for independently ready selected routes. Dry-run is the default; `--apply` runs only after preflight succeeds.
-
-```bash
-sf mcnext migration cms --target-org target-mcn --expected-target-org-id 00D000000000002AAA --plan-file migration-plan.json --result-file cms-result.json --report-root .mcnext-runs/cms-reports --allow-experimental-cms
-```
-
-## Safety and limitations
-
-- Planning and discovery do not authorize mutation. Check each command’s help before any write.
-- Read-only commands can still write local export, plan, or result files.
-- Core CLI delegation means core `sf` owns underlying jobs, errors, and transport for delegated commands.
-- Segment member IDs are opaque membership values, not asserted CRM record IDs.
-- Identity Resolution support covers configuration and planning, not unified-profile row migration.
-- Email commands are exact reads; the plugin does not publish or send email.
-- Data Graph support is metadata GET only; token exchange and graph mutation remain external.
-- The plugin does not provide complete dependency discovery, automatic reference rewriting, rollback, or end-to-end migration for all Marketing Cloud Next capabilities.
+- Data 360 components in `sf mcnext deploy` and `sf mcnext delete`. Use `sf data360 deploy` and `sf data360 delete` from [sf-plugin-data](https://www.npmjs.com/package/sf-plugin-data) for them; a run that names one is refused before anything is written.
+- Publish and unpublish. Use `sf cms publish` and `sf cms unpublish` for CMS content.
+- `--changed-since`, to deploy only what changed since a Git commit.
 
 ## License
 

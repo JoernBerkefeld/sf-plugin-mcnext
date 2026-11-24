@@ -10,7 +10,7 @@ import {
   createRunOwnedTemp,
   removeRunOwnedPath,
   removeRunOwnedRoot,
-} from '../lib/filesystem/runOwnedTemp.js';
+} from './run-owned-temp.mjs';
 
 const packageRoot = resolve(import.meta.dirname, '..');
 
@@ -113,9 +113,7 @@ import { loadNycConfig } from ${JSON.stringify(
         )};
 import assert from 'node:assert/strict';
 const mode = process.env.RUNNER_MODE;
-const cleanup = await import(${JSON.stringify(
-          pathToFileURL(join(packageRoot, 'lib/filesystem/runOwnedTemp.js')).href
-        )});
+const cleanup = await import(${JSON.stringify(pathToFileURL(join(packageRoot, 'scripts/run-owned-temp.mjs')).href)});
 let ownedRun;
 const freeze = Object.freeze;
 Object.freeze = (value) => { if (mode.startsWith('junction') && value?.root?.includes('sf-mcnext-unit-tests-')) ownedRun = value; return freeze(value); };
@@ -304,12 +302,12 @@ syncBuiltinESMExports();
   });
 }
 
-test('normal runner collects remapped dependencyGraph TS coverage and enforces real thresholds', async () => {
+test('normal runner collects remapped business-units TS coverage and enforces real thresholds', async () => {
   const run = await createRunOwnedTemp('sf-mcnext-normal-coverage-test');
   const fixture = await createRunOwnedDirectory(run, 'fixture');
   const preload = join(fixture, 'preload.mjs');
   const record = join(fixture, 'coverage.json');
-  const filename = join(packageRoot, 'src/capabilities/dependencyGraph.ts');
+  const filename = join(packageRoot, 'src/business-units.ts');
   try {
     await writeFile(
       preload,
@@ -323,7 +321,7 @@ fs.readFile = async (filename, ...args) => {
   if (String(filename).endsWith('.nycrc')) {
     const config = JSON.parse(contents);
     for (const metric of ['lines','statements','functions','branches']) config[metric] = Number(process.env.RUNNER_THRESHOLD);
-    return JSON.stringify({...config,extension:['.ts'],include:['src/capabilities/dependencyGraph.ts'], 'produce-source-map':true,'es-modules':true});
+    return JSON.stringify({...config,extension:['.ts'],include:['src/business-units.ts'], 'produce-source-map':true,'es-modules':true});
   }
   return contents;
 };
@@ -339,12 +337,7 @@ syncBuiltinESMExports();
     for (const threshold of [50, 99]) {
       const result = spawnSync(
         process.execPath,
-        [
-          '--import',
-          pathToFileURL(preload).href,
-          'scripts/run-unit-tests.mjs',
-          'test/capabilities/dependencyGraph.test.ts',
-        ],
+        ['--import', pathToFileURL(preload).href, 'scripts/run-unit-tests.mjs', 'test/business-units.test.ts'],
         {
           cwd: packageRoot,
           encoding: 'utf8',
@@ -354,7 +347,8 @@ syncBuiltinESMExports();
       );
       assert.ifError(result.error);
       assert.equal(result.status, threshold === 50 ? 0 : 1, result.stdout + result.stderr);
-      assert.match(result.stdout, /7 passing/u);
+      assert.match(result.stdout, /\b[1-9]\d* passing/u);
+      assert.doesNotMatch(result.stdout, /\d+ failing/u);
       assert.doesNotMatch(result.stderr, /no eligible|no source statement/u);
       if (threshold === 99) assert.match(result.stderr, /does not meet global threshold/u);
       const map = JSON.parse(await readFile(record, 'utf8'));
@@ -367,7 +361,9 @@ syncBuiltinESMExports();
       const lines = (await readFile(filename, 'utf8')).split('\n');
       assert.ok(statements.every((location) => location.start.line <= lines.length));
       assert.ok(
-        statements.some((location) => lines[location.start.line - 1].includes('assertPortableIdentity(identity)'))
+        statements.some((location) =>
+          lines[location.start.line - 1].includes('const dataSpaceNames = await readDataSpaceNames(connection);')
+        )
       );
     }
   } finally {

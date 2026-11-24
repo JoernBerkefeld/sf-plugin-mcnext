@@ -1,0 +1,68 @@
+[
+  {
+    "alias": [],
+    "command": "mcnext:delete",
+    "flagAliases": [],
+    "flagChars": ["d", "m", "o"],
+    "flags": [
+      "api-version",
+      "confirm-delete",
+      "flags-dir",
+      "json",
+      "keep-local-files",
+      "metadata",
+      "preview",
+      "source-dir",
+      "target-org",
+      "workspace"
+    ],
+    "plugin": "sf-plugin-mcnext"
+  },
+  {
+    "alias": [],
+    "command": "mcnext:deploy",
+    "flagAliases": [],
+    "flagChars": ["d", "m", "o"],
+    "flags": [
+      "allow-activation",
+      "allow-cross-dataspace",
+      "api-version",
+      "business-unit",
+      "dataspace",
+      "flags-dir",
+      "json",
+      "metadata",
+      "preview",
+      "source-dir",
+      "target-org",
+      "workspace"
+    ],
+    "plugin": "sf-plugin-mcnext"
+  },
+  {
+    "alias": [],
+    "command": "mcnext:list:business-unit",
+    "flagAliases": [],
+    "flagChars": ["o"],
+    "flags": ["api-version", "flags-dir", "json", "target-org"],
+    "plugin": "sf-plugin-mcnext"
+  },
+  {
+    "alias": [],
+    "command": "mcnext:retrieve",
+    "flagAliases": [],
+    "flagChars": ["m", "o"],
+    "flags": [
+      "api-version",
+      "business-unit",
+      "dataspace",
+      "flags-dir",
+      "json",
+      "metadata",
+      "output-dir",
+      "target-org",
+      "workspace"
+    ],
+    "plugin": "sf-plugin-mcnext"
+  }
+]

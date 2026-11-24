@@ -1,6 +1,6 @@
 {
   "name": "sf-plugin-mcnext",
-  "description": "Salesforce CLI plugin for Marketing Cloud Next read/write workflows and core CLI delegation",
+  "description": "Salesforce CLI plugin for Marketing Cloud Next campaigns and flows, with one deploy across Data 360, CMS and Marketing Cloud Next",
   "version": "0.11.0",
   "author": {
     "name": "Joern Berkefeld",
@@ -16,17 +16,19 @@
   },
   "homepage": "https://github.com/JoernBerkefeld/sf-plugin-mcnext#readme",
   "dependencies": {
-    "@oclif/core": "^4",
-    "@salesforce/core": "^9",
-    "@salesforce/sf-plugins-core": "^12",
-    "sf-plugin-cms": "^0.11.0",
-    "xml2js": "^0.6.2"
+    "@oclif/core": "^4.14.0",
+    "@salesforce/core": "^9.6.0",
+    "@salesforce/sf-plugins-core": "^13.0.9",
+    "@salesforce/source-deploy-retrieve": "^13.14.1",
+    "salesforce-data360-rules": "^0.2.0",
+    "sf-plugin-cms": "^0.26.0",
+    "sf-plugin-data": "^0.4.0"
   },
   "devDependencies": {
     "@oclif/plugin-command-snapshot": "^5.1.9",
     "@salesforce/cli-plugins-testkit": "^5.3.10",
     "@salesforce/dev-scripts": "^10",
-    "@types/xml2js": "^0.4.14",
+    "@types/node": "^22.20.5",
     "convert-source-map": "^1.9.0",
     "cross-env": "^10.1.0",
     "eslint-plugin-sf-plugin": "^1.18.6",
@@ -38,7 +40,7 @@
     "typescript": "^5.4.5"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": "^22.22.2 || ^24.15.0"
   },
   "files": ["/lib", "/messages", "/oclif.manifest.json", "/oclif.lock"],
   "keywords": [
@@ -59,11 +61,12 @@
     "devPlugins": ["@oclif/plugin-help"],
     "topics": {
       "mcnext": {
-        "description": "Export and inspect Marketing Cloud Next data and configuration, with core CLI delegation."
-      },
-      "mcn": {
-        "description": "Short alias for the mcnext topic.",
-        "hidden": true
+        "description": "Retrieve, deploy and delete Marketing Cloud Next campaigns and flows, together with the CMS content and Data 360 components they use.",
+        "subtopics": {
+          "list": {
+            "description": "List what the org has, such as its business units."
+          }
+        }
       }
     },
     "flexibleTaxonomy": true
@@ -148,6 +151,7 @@
         "scripts/parse-npm-pack-output.test.mjs",
         "scripts/verify-package-lifecycle.mjs",
         "scripts/verify-package-lifecycle.test.mjs",
+        "scripts/run-owned-temp.mjs",
         "scripts/run-unit-tests.mjs",
         "scripts/run-unit-tests.test.mjs",
         "scripts/coverage-loader.mjs",
@@ -163,14 +167,13 @@
       },
       "files": [
         "test/**/*.ts",
-        "test/demo-project/**",
-        "test/fixtures/demo-project/**/*.json",
         "README.md",
         "src/**/*.ts",
         "**/tsconfig.json",
         ".mocha*",
         "!*.nut.ts",
         ".nycrc",
+        "scripts/run-owned-temp.mjs",
         "scripts/run-unit-tests.mjs",
         "scripts/coverage-loader.mjs"
       ]
